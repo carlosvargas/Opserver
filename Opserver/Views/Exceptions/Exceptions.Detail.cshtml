@@ -16,7 +16,7 @@
             var Exception = @error.FullJson.AsHtml();
             $(function () {
             	Status.Exceptions.init({ log: '@error.ApplicationName', id: '@error.GUID.ToString()' });
-	            Exception.Body = JSON.parse(Exception.Body);
+	            if (Exception.Body != "") Exception.Body = JSON.parse(Exception.Body);
 	            $(".error-request-detail").html(JSON.stringify(Exception, undefined, 2));
             });
         </script>
