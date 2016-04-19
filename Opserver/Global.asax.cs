@@ -36,8 +36,13 @@ namespace StackExchange.Opserver
 
         private static void RegisterBundles(BundleCollection bundles)
         {
-            bundles.Add(new ScriptBundle("~/scripts/plugins.js").IncludeDirectory("~/Content/js/plugins", "*.js"));
-            bundles.Add(new ScriptBundle("~/scripts/scripts.js").Include("~/Content/js/Scripts*"));
+            bundles.Add(
+                new ScriptBundle("~/scripts/plugins.js")
+                    .Include("~/Content/bootstrap/js/bootstrap.min.js")
+                    .IncludeDirectory("~/Content/js/plugins", "*.js"));
+            bundles.Add(
+                new ScriptBundle("~/scripts/scripts.js")
+                    .Include("~/Content/js/Scripts*"));
         }
 
         public override void Init()
@@ -77,7 +82,6 @@ namespace StackExchange.Opserver
             MiniProfiler.Settings.RouteBasePath = "~/profiler/";
             MiniProfiler.Settings.PopupRenderPosition = RenderPosition.Left;
             var paths = MiniProfiler.Settings.IgnoredPaths.ToList();
-            paths.Add("/graph/");
             paths.Add("/login");
             MiniProfiler.Settings.IgnoredPaths = paths.ToArray();
             MiniProfiler.Settings.PopupMaxTracesToShow = 5;
@@ -103,15 +107,6 @@ namespace StackExchange.Opserver
         {
             if (ShouldProfile())
                 MiniProfiler.Stop();
-        }
-
-        public override string GetVaryByCustomString(HttpContext context, string arg)
-        {
-            if (arg.ToLower() == "highDPI")
-            {
-                return Current.IsHighDPI.ToString();
-            }
-            return base.GetVaryByCustomString(context, arg);
         }
 
         private static void GetCustomErrorData(Exception ex, HttpContext context, Dictionary<string, string> data)

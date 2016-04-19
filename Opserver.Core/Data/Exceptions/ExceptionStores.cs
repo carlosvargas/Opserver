@@ -9,22 +9,13 @@ namespace StackExchange.Opserver.Data.Exceptions
 {
     public class ExceptionStores
     {
-        public const string AllExceptionsListKey = "Exceptions-GetAllErrors";
+        public const string AllExceptionsListKey = "Exceptions-GetAllErrorsAsync";
 
-        public static List<Application> Applications
-        {
-            get { return GetApplications(); }
-        }
+        public static List<Application> Applications => GetApplications();
 
-        public static int TotalExceptionCount
-        {
-            get { return Applications.Sum(a => a.ExceptionCount); }
-        }
+        public static int TotalExceptionCount => Applications.Sum(a => a.ExceptionCount);
 
-        public static int TotalRecentExceptionCount
-        {
-            get { return Applications.Sum(a => a.RecentExceptionCount); }
-        }
+        public static int TotalRecentExceptionCount => Applications.Sum(a => a.RecentExceptionCount);
 
         public static MonitorStatus MonitorStatus
         {
@@ -51,54 +42,59 @@ namespace StackExchange.Opserver.Data.Exceptions
             }
         }
 
-        public static List<ExceptionStore> Stores { get; private set; }
-        public static List<Application> ConfigApplications { get; private set; }
+        public static List<ExceptionStore> Stores { get; } =
+            Current.Settings.Exceptions.Stores
+                .Select(s => new ExceptionStore(s))
+                .Where(s => s.TryAddToGlobalPollers())
+                .ToList();
 
-        static ExceptionStores()
+        public static List<Application> ConfigApplications { get; } =
+            Current.Settings.Exceptions.Applications
+                .Select(a => new Application {Name = a}).ToList();
+
+        public static async Task<Error> GetError(string appName, Guid guid)
         {
-            Stores = Current.Settings.Exceptions.Stores
-                            .Select(s => new ExceptionStore(s))
-                            .Where(s => s.TryAddToGlobalPollers())
-                            .ToList();
-
-            ConfigApplications = Current.Settings.Exceptions.Applications
-                                        .Select(a => new Application {Name = a}).ToList();
+            var stores = GetStores(appName);
+            var result = await Task.WhenAll(stores.Select(s => s.GetErrorAsync(guid)));
+            return result.FirstOrDefault(e => e != null);
         }
 
-        public static Task<Error> GetError(string appName, Guid guid)
-        {
-            return GetStores(appName).Select(async s => await s.GetError(guid)).FirstOrDefault(e => e != null);
-        }
-
-        public static async Task<T> Action<T>(string appName, Func<ExceptionStore, Task<T>> action)
+        public static async Task<T> ActionAsync<T>(string appName, Func<ExceptionStore, Task<T>> action)
         {
             var result = default(T);
-            foreach(var a in GetApps(appName))
+            List<Task> toPoll = new List<Task>();
+            foreach (var s in GetApps(appName).Select(a => a.Store).Distinct())
             {
-                var aResult = await action(a.Store);
+                if (s == null)
+                {
+                    continue;
+                }
+                var aResult = await action(s).ConfigureAwait(false);
                 if (typeof(T) == typeof(bool) && Convert.ToBoolean(aResult))
                 {
                     result = aResult;
                 }
-                if (a.Store != null)
-                {
-                    a.Store.Applications.Purge();
-                    a.Store.ErrorSummary.Purge();
-                }
+                toPoll.Add(s.Applications.PollAsync(true));
+                toPoll.Add(s.ErrorSummary.PollAsync(true));
             }
+            await Task.WhenAll(toPoll);
             return result;
         }
 
         public static IEnumerable<Application> GetApps(string appName)
         {
-            return Applications.Where(a => a.Name == appName);
+            foreach (var a in Applications)
+            {
+                if (a.Name == appName || appName == null)
+                    yield return a;
+            }
         }
 
         private static IEnumerable<ExceptionStore> GetStores(string appName)
         {
             var stores = GetApps(appName).Where(a => a.Store != null).Select(a => a.Store).Distinct();
             // if we have no error stores hooked up, return all stores to search
-            return stores.Any() ? stores : Applications.Where(a => a.Store != null).Select(a => a.Store).Distinct();
+            return stores.Any() ? stores : Stores;
         }
 
         private static IEnumerable<Error> GetSorted(IEnumerable<Error> source, ExceptionSorts? sort = ExceptionSorts.TimeDesc)
@@ -147,7 +143,7 @@ namespace StackExchange.Opserver.Data.Exceptions
 
         public static List<Error> GetAllErrors(string appName = null, int maxPerApp = 5000, ExceptionSorts sort = ExceptionSorts.TimeDesc)
         {
-            using (MiniProfiler.Current.Step("GetAllErrors() - All Stores" + (appName.HasValue() ? " (app:" + appName + ")" : "")))
+            using (MiniProfiler.Current.Step(nameof(GetAllErrors) + "() - All Stores" + (appName.HasValue() ? " (app:" + appName + ")" : "")))
             {
                 var allErrors = Stores.SelectMany(s => s.GetErrorSummary(maxPerApp, appName));
                 return GetSorted(allErrors, sort).ToList();
@@ -157,8 +153,8 @@ namespace StackExchange.Opserver.Data.Exceptions
         public static async Task<List<Error>> GetSimilarErrorsAsync(Error error, bool byTime = false, int max = 200, ExceptionSorts sort = ExceptionSorts.TimeDesc)
         {
             if (error == null) return new List<Error>();
-            var errorFetches = GetStores(error.ApplicationName).Select(s => byTime ? s.GetSimilarErrorsInTime(error, max) : s.GetSimilarErrors(error, max));
-            var similarErrors = (await Task.WhenAll(errorFetches)).SelectMany(e => e);
+            var errorFetches = GetStores(error.ApplicationName).Select(s => byTime ? s.GetSimilarErrorsInTimeAsync(error, max) : s.GetSimilarErrorsAsync(error, max));
+            var similarErrors = (await Task.WhenAll(errorFetches).ConfigureAwait(false)).SelectMany(e => e);
             return GetSorted(similarErrors, sort).ToList();
         }
 
@@ -166,16 +162,16 @@ namespace StackExchange.Opserver.Data.Exceptions
         {
             if (searchText.IsNullOrEmpty()) return new List<Error>();
             var stores = appName.HasValue() ? GetStores(appName) : Stores;
-            var errorFetches = stores.Select(s => s.FindErrors(searchText, appName, max, includeDeleted));
-            var results = (await Task.WhenAll(errorFetches)).SelectMany(e => e);
+            var errorFetches = stores.Select(s => s.FindErrorsAsync(searchText, appName, max, includeDeleted));
+            var results = (await Task.WhenAll(errorFetches).ConfigureAwait(false)).SelectMany(e => e);
             return GetSorted(results, sort).ToList();
         }
         
         private static List<Application> GetApplications()
         {
-            using (MiniProfiler.Current.Step("GetApplications() - All Stores"))
+            using (MiniProfiler.Current.Step(nameof(GetApplications) + "() - All Stores"))
             {
-                var apps = Stores.SelectMany(s => s.Applications.SafeData(true)).ToList();
+                var apps = Stores.SelectMany(s => s.Applications?.Data ?? Enumerable.Empty<Application>()).ToList();
                 if (!ConfigApplications.Any()) return apps;
 
                 var result = ConfigApplications.ToList();

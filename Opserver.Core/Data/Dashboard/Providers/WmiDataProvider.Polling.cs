@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.DirectoryServices.ActiveDirectory;
 using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Tasks;
 using StackExchange.Opserver.Monitoring;
 
@@ -14,14 +14,31 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
     {
         private partial class WmiNode
         {
-            public async Task<Node> PollNodeInfo()
+            private static readonly string MachineDomainName;
+ 
+            static WmiNode()
+            {
+                try
+                {
+                    // throws a 
+                    var d = Domain.GetComputerDomain();
+                    MachineDomainName = d.Name;
+                }
+                catch (ActiveDirectoryObjectNotFoundException) { }
+                catch (Exception e)
+                {
+                    Current.LogException(e);
+                }
+            }
+ 
+            public async Task<Node> PollNodeInfoAsync()
             {
                 try
                 {
                     // TODO: Check concurrency options for a Task.WaitAll
-                    await UpdateNodeData();
-                    await GetAllInterfaces();
-                    await GetAllVolumes();
+                    await UpdateNodeDataAsync().ConfigureAwait(false);
+                    await GetAllInterfacesAsync().ConfigureAwait(false);
+                    await GetAllVolumesAsync().ConfigureAwait(false);
                     SetReferences();
                 }
                 catch (COMException e)
@@ -37,9 +54,9 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 try
                 {
                     // TODO: Check concurrency options for a Task.WaitAll
-                    await PollCpuUtilization();
-                    await PollMemoryUtilization();
-                    await PollNetworkUtilization();
+                    await PollCpuUtilizationAsync().ConfigureAwait(false);
+                    await PollMemoryUtilizationAsync().ConfigureAwait(false);
+                    await PollNetworkUtilizationAsync().ConfigureAwait(false);
                 }
                 catch (COMException e)
                 {
@@ -49,21 +66,25 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 return this;
             }
 
-            private async Task UpdateNodeData()
+            private async Task UpdateNodeDataAsync()
             {
                 const string machineQuery = @"select 
                 DNSHostName,
+                Domain,
                 Manufacturer,
                 Model
                 from Win32_ComputerSystem";
-                using (var q = Wmi.Query(Name, machineQuery))
+                using (var q = Wmi.Query(Endpoint, machineQuery))
                 {
-                    var data = await q.GetFirstResult();
+                    var data = await q.GetFirstResultAsync().ConfigureAwait(false);
                     if (data == null)
                         return;
                     Model = data.Model;
                     Manufacturer = data.Manufacturer;
-                    Name = data.DNSHostName;
+                    // Only use domain if we're on one - not for things like workgroups
+                    Name = MachineDomainName.HasValue() && data.Domain != MachineDomainName
+                        ? $"{data.DNSHostName}.{data.Domain}"
+                        : data.DNSHostName;
                 }
 
                 const string query = @"select 
@@ -75,9 +96,9 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 Version
                 from Win32_OperatingSystem";
 
-                using (var q = Wmi.Query(Name, query))
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    var data = await q.GetFirstResult();
+                    var data = await q.GetFirstResultAsync().ConfigureAwait(false);
                     if (data == null)
                         return;
                     LastBoot = ManagementDateTimeConverter.ToDateTime(data.LastBootUpTime);
@@ -91,30 +112,23 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 Status = NodeStatus.Active;
             }
 
-            private async Task GetAllInterfaces()
+            private async Task GetAllInterfacesAsync()
             {
-                //if (KernelVersion > WindowsKernelVersions.Windows2012And8)
-                //{
-                //    //ActiveMaximumTransmissionUnit
-                //    //MtuSize
-                //    //
-                //    //Speed
-                //}
-
                 const string query = @"
 SELECT Name,
        DeviceID,
        NetConnectionID,
        Description,
        MACAddress,
-       Speed
+       Speed,
+       InterfaceIndex
   FROM Win32_NetworkAdapter
  WHERE NetConnectionStatus = 2"; //connected adapters.
                 //'AND PhysicalAdapter = True' causes exceptions with old windows versions.
-
-                using (var q = Wmi.Query(Name, query))
+                var indexMap = new Dictionary<uint, Interface>();
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    foreach (var data in await q.GetDynamicResult())
+                    foreach (var data in await q.GetDynamicResultAsync().ConfigureAwait(false))
                     {
                         string id = $"{data.DeviceID}";
                         var i = Interfaces.FirstOrDefault(x => x.Id == id);
@@ -123,26 +137,57 @@ SELECT Name,
                             i = new Interface();
                             Interfaces.Add(i);
                         }
+                        indexMap[data.InterfaceIndex] = i;
 
                         i.Id = $"{data.DeviceID}";
                         i.Alias = "!alias";
                         i.Caption = data.NetConnectionID == "Ethernet" ? data.Name : data.NetConnectionID;
                         i.FullName = data.Description;
-                        i.IfName = data.Name;
                         i.NodeId = Id;
-                        i.Index = 0;
-                        i.IsTeam = false; //TODO: Fix
                         i.LastSync = DateTime.UtcNow;
                         i.Name = data.Name;
                         i.PhysicalAddress = data.MACAddress;
                         i.Speed = data.Speed;
                         i.Status = NodeStatus.Active;
                         i.TypeDescription = "";
+                        i.IPs = new List<IPNet>();
+                    }
+                }
+
+                const string ipQuery = @"
+Select InterfaceIndex, IPAddress, IPSubnet, DHCPEnabled
+  From WIn32_NetworkAdapterConfiguration 
+ Where IPEnabled = 'True'";
+
+                using (var q = Wmi.Query(Endpoint, ipQuery))
+                {
+                    foreach (var data in await q.GetDynamicResultAsync().ConfigureAwait(false))
+                    {
+                        Interface i;
+                        if (indexMap.TryGetValue(data.InterfaceIndex, out i))
+                        {
+                            i.DHCPEnabled = data.DHCPEnabled;
+                            string[] ips = data.IPAddress as string[],
+                                     subnets = data.IPSubnet as string[];
+                            for (var j = 0; j < (ips?.Length).GetValueOrDefault(0); j++)
+                            {
+                                IPNet net;
+                                int cidr;
+                                if (int.TryParse(subnets[j], out cidr) && IPNet.TryParse(ips[j], cidr, out net))
+                                {
+                                    i.IPs.Add(net);
+                                }
+                                else if (IPNet.TryParse(ips[j], subnets[j], out net))
+                                {
+                                    i.IPs.Add(net);
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            private async Task GetAllVolumes()
+            private async Task GetAllVolumesAsync()
             {
                 const string query = @"
 SELECT Caption,
@@ -155,9 +200,9 @@ SELECT Caption,
   FROM Win32_LogicalDisk
  WHERE DriveType = 3"; //fixed disks
 
-                using (var q = Wmi.Query(Name, query))
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    foreach (var disk in await q.GetDynamicResult())
+                    foreach (var disk in await q.GetDynamicResultAsync().ConfigureAwait(false))
                     {
                         var id = $"{disk.DeviceID}";
                         var v = Volumes.FirstOrDefault(x => x.Id == id);
@@ -185,16 +230,16 @@ SELECT Caption,
                 }
             }
             
-            private async Task PollCpuUtilization()
+            private async Task PollCpuUtilizationAsync()
             {
                 const string query = @"
 SELECT PercentProcessorTime 
   FROM Win32_PerfFormattedData_PerfOS_Processor
  WHERE Name = '_Total'";
 
-                using (var q = Wmi.Query(Name, query))
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    var data = await q.GetFirstResult();
+                    var data = await q.GetFirstResultAsync().ConfigureAwait(false);
                     if (data == null)
                         return;
                 
@@ -208,15 +253,15 @@ SELECT PercentProcessorTime
                 }
             }
 
-            private async Task PollMemoryUtilization()
+            private async Task PollMemoryUtilizationAsync()
             {
                 const string query = @"
 SELECT AvailableKBytes 
   FROM Win32_PerfFormattedData_PerfOS_Memory";
                 
-                using (var q = Wmi.Query(Name, query))
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    var data = await q.GetFirstResult();
+                    var data = await q.GetFirstResultAsync().ConfigureAwait(false);
                     if (data == null)
                         return;
 
@@ -236,15 +281,17 @@ SELECT AvailableKBytes
             private static string GetCounterName(string original)
             {
                 return CounterLookup.GetOrAdd(original,
-                    k => new StringBuilder(k)
+                    k => StringBuilderCache.Get()
+                        .Append(k)
                         .Replace("\\", "_")
                         .Replace("/", "_")
                         .Replace("(", "[")
                         .Replace(")", "]")
-                        .Replace("#", "_").ToString());
+                        .Replace("#", "_")
+                        .ToStringRecycle());
             }
 
-            private async Task PollNetworkUtilization()
+            private async Task PollNetworkUtilizationAsync()
             {
                 const string query = @"
 SELECT Name,
@@ -262,9 +309,9 @@ SELECT Name,
                     OutAvgBps = 0
                 };
 
-                using (var q = Wmi.Query(Name, query))
+                using (var q = Wmi.Query(Endpoint, query))
                 {
-                    foreach (var data in await q.GetDynamicResult())
+                    foreach (var data in await q.GetDynamicResultAsync().ConfigureAwait(false))
                     {
                         if (data == null) continue;
                         var iface = Interfaces.FirstOrDefault(i => data.Name == GetCounterName(i.Name));

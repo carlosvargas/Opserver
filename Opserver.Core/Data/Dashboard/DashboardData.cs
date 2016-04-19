@@ -43,15 +43,17 @@ namespace StackExchange.Opserver.Data.Dashboard
             _dataProviders.ForEach(p => p.TryAddToGlobalPollers());
         }
 
+        public static bool AnyDoingFirstPoll => _dataProviders.Any(p => p.FirstPollRun != null);
+
         public static ReadOnlyCollection<DashboardDataProvider> DataProviders => _dataProviders.AsReadOnly();
 
         public static IEnumerable<string> ProviderExceptions =>
-            _dataProviders.Count == 0
+            _dataProviders.Count == 1
                 ? _dataProviders[0].GetExceptions()
                 : _dataProviders.SelectMany(p => p.GetExceptions());
 
         public static List<Node> AllNodes =>
-            _dataProviders.Count == 0
+            _dataProviders.Count == 1
                 ? _dataProviders[0].AllNodes
                 : _dataProviders.SelectMany(p => p.AllNodes).ToList();
 

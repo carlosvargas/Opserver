@@ -13,8 +13,8 @@ namespace StackExchange.Opserver.Data.SQL
             {
                 return _perfCounters ?? (_perfCounters = new Cache<List<PerfCounterRecord>>
                     {
-                        CacheForSeconds = 20,
-                        UpdateCache = UpdateFromSql("PerfCounters", conn =>
+                        CacheForSeconds = RefreshInterval,
+                        UpdateCache = UpdateFromSql(nameof(PerfCounters), conn =>
                             {
                                 var sql = GetFetchSQL<PerfCounterRecord>();
                                 return conn.QueryAsync<PerfCounterRecord>(sql, new {maxEvents = 60});
@@ -23,14 +23,16 @@ namespace StackExchange.Opserver.Data.SQL
             }
         }
 
+        public long? BatchesPerSec => (long?)GetPerfCounter("SQL Statistics", "Batch Requests/sec", "")?.CalculatedValue;
+        
         public PerfCounterRecord GetPerfCounter(string category, string name, string instance)
         {
-            var counters = PerfCounters.SafeData();
+            // TODO Split fields on fetch and compare each rather than a concat per lookup
             var objectName = ObjectName + ":" + category;
-            return counters?.FirstOrDefault(c => c.ObjectName == objectName && c.CounterName == name && c.InstanceName == instance);
+            return PerfCounters.Data?.FirstOrDefault(c => c.ObjectName == objectName && c.CounterName == name && c.InstanceName == instance);
         }
 
-        public class PerfCounterRecord : ISQLVersionedObject
+        public class PerfCounterRecord : ISQLVersioned
         {
             public Version MinVersion => SQLServerVersions.SQL2000.RTM;
 
@@ -41,7 +43,7 @@ namespace StackExchange.Opserver.Data.SQL
             public decimal CalculatedValue { get; internal set; }
             public int Type { get; internal set; }
 
-            internal string FetchSQL = @"
+            internal const string FetchSQL = @"
 Declare @PCounters Table (object_name nvarchar(128),
                           counter_name nvarchar(128),
                           instance_name nvarchar(128),

@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Xml.Serialization;
+using Dapper;
 using StackExchange.Opserver.Data.SQL.QueryPlans;
 
 namespace StackExchange.Opserver.Data.SQL
@@ -12,22 +13,19 @@ namespace StackExchange.Opserver.Data.SQL
     {
         public Cache<List<TopOperation>> GetTopOperations(TopSearchOptions options = null)
         {
-            return new Cache<List<TopOperation>>
-            {
-                CacheKey = GetCacheKey("TopOperations-" + (options?.GetHashCode() ?? 0)),
-                CacheForSeconds = 15,
-                CacheStaleForSeconds = 5*60,
-                UpdateCache = UpdateFromSql("Top Operations", conn =>
+            return Cache<List<TopOperation>>.WithKey(
+                GetCacheKey(nameof(GetTopOperations) + "-" + (options?.GetHashCode() ?? 0).ToString()),
+                UpdateFromSql("Top Operations", conn =>
                 {
                     var hasOptions = options != null;
                     var sql = string.Format(GetFetchSQL<TopOperation>(),
-                        (hasOptions ? options.ToSQLWhere() + options.ToSQLOrder() : ""),
-                        (hasOptions ? options.ToSQLSearch() : ""));
+                        hasOptions ? options.ToSQLWhere() + options.ToSQLOrder() : "",
+                        hasOptions ? options.ToSQLSearch() : "");
                     sql = sql.Replace("query_plan AS QueryPlan,", "")
-                             .Replace("CROSS APPLY sys.dm_exec_query_plan(PlanHandle) AS qp", "");
+                        .Replace("CROSS APPLY sys.dm_exec_query_plan(PlanHandle) AS qp", "");
                     return conn.QueryAsync<TopOperation>(sql, options);
-                })
-            };
+                }),
+                15, 5*60);
         }
 
         public Cache<TopOperation> GetTopOperation(byte[] planHandle, int? statementStartOffset = null)
@@ -35,18 +33,15 @@ namespace StackExchange.Opserver.Data.SQL
             var clause = " And (qs.plan_handle = @planHandle OR qs.sql_handle = @planHandle)";
             if (statementStartOffset.HasValue) clause += " And qs.statement_start_offset = @statementStartOffset";
             string sql = string.Format(GetFetchSQL<TopOperation>(), clause, "");
-            return new Cache<TopOperation>
-                {
-                    CacheKey = GetCacheKey("TopOperation-" + planHandle.GetHashCode() + "-" + statementStartOffset),
-                    CacheForSeconds = 60,
-                    CacheStaleForSeconds = 5*60,
-                    UpdateCache = UpdateFromSql("Top Operations",
-                                                async conn =>
-                                                (await conn.QueryAsync<TopOperation>(sql, new {planHandle, statementStartOffset, MaxResultCount = 1})).FirstOrDefault())
-                };
+            return Cache<TopOperation>.WithKey(
+                GetCacheKey(nameof(GetTopOperation) + "-" + planHandle.GetHashCode().ToString() + "-" + statementStartOffset.ToString()),
+                UpdateFromSql("Top Operations",
+                    conn => conn.QueryFirstOrDefaultAsync<TopOperation>(sql,
+                        new {planHandle, statementStartOffset, MaxResultCount = 1})),
+                60, 5*60);
         }
 
-        public class TopOperation : ISQLVersionedObject
+        public class TopOperation : ISQLVersioned
         {
             public Version MinVersion => SQLServerVersions.SQL2005.RTM;
 
@@ -226,15 +221,32 @@ FROM (SELECT TOP (@MaxResultCount)
             public int? Database { get; set; }
 
             public static TopSearchOptions Default => new TopSearchOptions().SetDefaults();
+            
+            private int DefaultMinExecs = 25;
+            private int DefaultLastRunSeconds = 24 * 60 * 60;
+            private int DefaultMaxResultCount = 100;
 
             public TopSearchOptions SetDefaults()
             {
                 Sort = Sort ?? TopSorts.AvgCPUPerMinute;
-                MinExecs = MinExecs ?? 25;
-                LastRunSeconds = LastRunSeconds ?? 24*60*60;
+                MinExecs = MinExecs ?? DefaultMinExecs;
+                LastRunSeconds = LastRunSeconds ?? DefaultLastRunSeconds;
                 MinLastRunDate = MinLastRunDate ?? DateTime.UtcNow.AddDays(-1);
-                MaxResultCount = MaxResultCount ?? 100;
+                MaxResultCount = MaxResultCount ?? DefaultMaxResultCount;
                 return this;
+            }
+
+            public bool IsNonDefault
+            {
+                get
+                {
+                    if (MinExecs != DefaultMinExecs) return true;
+                    if (LastRunSeconds != DefaultLastRunSeconds) return true;
+                    if (MaxResultCount != DefaultMaxResultCount) return true;
+                    if (Database.HasValue) return true;
+                    if (Search.HasValue()) return true;
+                    return false;
+                }
             }
 
             public string ToSQLWhere()

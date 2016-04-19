@@ -1,9 +1,8 @@
-﻿using System.Text;
+﻿using System;
 using System.Web.Mvc;
 using StackExchange.Opserver.Views.Shared;
 using StackExchange.Profiling;
 using StackExchange.Opserver.Data;
-using StackExchange.Opserver.Data.Dashboard;
 using StackExchange.Opserver.Helpers;
 using StackExchange.Opserver.Models;
 using StackExchange.Opserver.Views.Home;
@@ -38,7 +37,7 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("about/caches"), AlsoAllow(Roles.InternalRequest)]
-        public ActionResult AboutCaches(string filter, bool refresh = false)
+        public ActionResult AboutCaches(string filter, bool refresh = true)
         {
             var vd = new AboutModel
                 {
@@ -51,7 +50,7 @@ namespace StackExchange.Opserver.Controllers
         [Route("debug"), AllowAnonymous]
         public ActionResult Debug()
         {
-            var sb = new StringBuilder()
+            var sb = StringBuilderCache.Get()
                 .AppendFormat("Request IP: {0}\n", Current.RequestIP)
                 .AppendFormat("Request User: {0}\n", Current.User.AccountName)
                 .AppendFormat("Request Roles: {0}\n", Current.User.RawRoles)
@@ -66,15 +65,15 @@ namespace StackExchange.Opserver.Controllers
             sb.AppendLine()
               .AppendLine("Polling Info:")
               .AppendLine(ps.GetPropertyNamesAndValues());
-            return TextPlain(sb);
+            return TextPlain(sb.ToStringRecycle());
         }
 
-
-        [Route("test")]
-        public ActionResult Test(string node = null)
+        [Route("error-test")]
+        public ActionResult ErrorTestPage()
         {
-            var n = DashboardData.GetNodeByName(node);
-            return View(n);
+            Current.LogException(new Exception("Test Exception via GlobalApplication.LogException()"));
+
+            throw new NotImplementedException("I AM IMPLEMENTED, I WAS BORN TO THROW ERRORS!");
         }
     }
 }

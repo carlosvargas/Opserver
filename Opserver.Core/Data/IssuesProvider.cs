@@ -1,16 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using StackExchange.Profiling;
 
 namespace StackExchange.Opserver.Data
 {
     public class IssueProvider
     {
-        private static readonly List<IIssuesProvider> _issueProviders;
+        private static readonly List<IIssuesProvider> IssueProviders;
 
         static IssueProvider()
         {
-            _issueProviders = new List<IIssuesProvider>();
+            IssueProviders = new List<IIssuesProvider>();
             var providers = AppDomain.CurrentDomain.GetAssemblies()
                                      .SelectMany(s => s.GetTypes())
                                      .Where(typeof (IIssuesProvider).IsAssignableFrom);
@@ -19,7 +21,7 @@ namespace StackExchange.Opserver.Data
                 if (!p.IsClass) continue;
                 try
                 {
-                    _issueProviders.Add((IIssuesProvider) Activator.CreateInstance(p));
+                    IssueProviders.Add((IIssuesProvider) Activator.CreateInstance(p));
                 }
                 catch (Exception e)
                 {
@@ -28,21 +30,39 @@ namespace StackExchange.Opserver.Data
             }
         }
 
-        public static IEnumerable<Issue> GetIssues()
+        public static List<Issue> GetIssues()
         {
-            // TODO: Better Ordering
-            return _issueProviders
-                .SelectMany(p => p.GetIssues())
-                .OrderByDescending(i => i.IsService)
-                .ThenByDescending(i => i.MonitorStatus)
-                .ThenByDescending(i => i.Date)
-                .ThenBy(i => i.Title);
+            using (MiniProfiler.Current.Step("GetIssues"))
+                return Current.LocalCache.GetSet<List<Issue>>("IssuesList", (old, ctx) =>
+                {
+                    var result = new List<Issue>();
+                    Parallel.ForEach(IssueProviders, p =>
+                    {
+                        List<Issue> pIssues;
+                        using (MiniProfiler.Current.Step("Issues: " + p.Name))
+                        {
+                            pIssues = p.GetIssues().ToList();
+                        }
+                        lock (result)
+                        {
+                            result.AddRange(pIssues);
+                        }
+                    });
+
+                    return result
+                        .OrderByDescending(i => i.IsService)
+                        .ThenByDescending(i => i.MonitorStatus)
+                        .ThenByDescending(i => i.Date)
+                        .ThenBy(i => i.Title)
+                        .ToList();
+                }, 60, 4*60*60);
         }
     }
 
 
     public interface IIssuesProvider
     {
+        string Name { get; }
         IEnumerable<Issue> GetIssues();
     }
 

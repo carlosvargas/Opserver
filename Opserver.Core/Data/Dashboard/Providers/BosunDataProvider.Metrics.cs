@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -27,7 +28,7 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
 
             public static string ConvertTime(DateTime? date, DateTime valueIfNull)
             {
-                return (date ?? valueIfNull).ToString("yyyy/MM/dd-HH:mm:ss");
+                return (date ?? valueIfNull).ToString("yyyy/MM/dd-HH:mm:ss", CultureInfo.InvariantCulture);
             }
 
             public void AddQuery(string metric, string host = "*", bool counter = true, IDictionary<string, string> tags = null)
@@ -55,11 +56,11 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
             }
         }
 
-        public async Task<BosunMetricResponse> RunTSDBQuery(TSDBQuery query, int? pointCount = null)
+        public async Task<BosunMetricResponse> RunTSDBQueryAsync(TSDBQuery query, int? pointCount = null)
         {
             var json = JSON.SerializeDynamic(query, Options.ExcludeNullsUtc);
-            var url = GetUrl($"api/graph?json={json}{(pointCount.HasValue ? "&autods=" + pointCount : "")}");
-            var apiResult = await GetFromBosun<BosunMetricResponse>(url);
+            var url = GetUrl($"api/graph?json={json}{(pointCount.HasValue ? "&autods=" + pointCount.ToString() : "")}");
+            var apiResult = await GetFromBosunAsync<BosunMetricResponse>(url).ConfigureAwait(false);
             return apiResult.Result;
         }
 
@@ -67,8 +68,8 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
         {
             metricName = BosunMetric.GetDenormalized(metricName, host);
             var query = new TSDBQuery(start, end);
-            query.AddQuery(metricName, host, BosunMetric.IsCounter(metricName), tags);
-            return RunTSDBQuery(query, 1000);
+            query.AddQuery(metricName, host, BosunMetric.IsCounter(metricName, host), tags);
+            return RunTSDBQueryAsync(query, 500);
         }
 
         private Cache<IntervalCache> _dayCache;
@@ -82,7 +83,7 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                     Func<string, string[], Task> addMetric = async (metricName, tags) =>
                     {
                         var tagDict = tags?.ToDictionary(t => t, t => "*");
-                        var apiResult = await GetMetric(metricName, result.StartTime, tags: tagDict);
+                        var apiResult = await GetMetric(metricName, result.StartTime, tags: tagDict).ConfigureAwait(false);
                         if (apiResult == null) return;
                         if (tags?.Any() ?? false)
                         {
@@ -97,7 +98,7 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                     var c = addMetric(BosunMetric.Globals.CPU, null);
                     var m = addMetric(BosunMetric.Globals.MemoryUsed, null);
                     var n = addMetric(BosunMetric.Globals.NetBytes, new[] {BosunMetric.Tags.Direction});
-                    await Task.WhenAll(c, m, n); // parallel baby!
+                    await Task.WhenAll(c, m, n).ConfigureAwait(false); // parallel baby!
 
                     return result;
                 }, 60, 3600));
@@ -146,8 +147,7 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
 
         private static class Suffixes
         {
-            public const string CPU = ".os.cpu";
-            public const string MemoryUsed = ".os.mem.used";
+            public const string CPU = "." + Globals.CPU;
         }
 
         public static class Tags
@@ -174,20 +174,25 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 => new Dictionary<string, string> {{Tags.Direction, "*"}, {Tags.IFace, ifaceId}};
         }
 
-        public static bool IsCounter(string metric)
+        public static bool IsCounter(string metric, string host)
         {
             if (metric.IsNullOrEmpty()) return false;
+            if (metric.StartsWith("__"))
+            {
+                metric = metric.Replace($"__{host}.", "");
+            }
             switch (metric)
             {
                 case Globals.CPU:
                 case Globals.NetBytes:
                 case Globals.NetBondBytes:
+                case Globals.NetOtherBytes:
+                case Globals.NetTunnelBytes:
+                case Globals.NetVirtualBytes:
                     return true;
+                default:
+                    return false;
             }
-            if (metric.EndsWith(Suffixes.CPU))
-                return true;
-
-            return false;
         }
 
         public static string InterfaceMetricName(Interface i)
@@ -214,9 +219,13 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 switch (metric)
                 {
                     case Globals.CPU:
-                        return $"__{host}{Suffixes.CPU}";
                     case Globals.MemoryUsed:
-                        return $"__{host}{Suffixes.MemoryUsed}";
+                    case Globals.NetBondBytes:
+                    case Globals.NetOtherBytes:
+                    case Globals.NetTunnelBytes:
+                    case Globals.NetVirtualBytes:
+                    case Globals.NetBytes:
+                        return $"__{host}.{metric}";
                 }
             }
             return metric;

@@ -12,16 +12,19 @@ namespace StackExchange.Opserver.Controllers
     [OnlyAllow(Roles.PagerDuty)]
     public partial class PagerDutyController : StatusController
     {
-        protected override ISecurableSection SettingsSection => Current.Settings.PagerDuty;
+        public override ISecurableSection SettingsSection => Current.Settings.PagerDuty;
 
-        protected override string TopTab => TopTabs.BuiltIn.PagerDuty;
+        public override TopTab TopTab => new TopTab("PagerDuty", nameof(Dashboard), this, 45)
+        {
+            GetMonitorStatus = () => PagerDutyAPI.Instance.MonitorStatus
+        };
 
         public PagerDutyPerson CurrentPagerDutyPerson
         {
             get
             {
-                var allUsers = PagerDutyApi.Instance.AllUsers.SafeData(true);
-                var pdMap = PagerDutyApi.Instance.Settings.UserNameMap.FirstOrDefault(
+                var allUsers = PagerDutyAPI.Instance.AllUsers.SafeData(true);
+                var pdMap = PagerDutyAPI.Instance.Settings.UserNameMap.FirstOrDefault(
                     un => un.OpServerName == Current.User.AccountName);
                 return pdMap != null
                     ? allUsers.Find(u => u.EmailUserName == pdMap.EmailUser)
@@ -30,9 +33,9 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("pagerduty")]
-        public ActionResult PagerDutyDashboard()
+        public ActionResult Dashboard()
         {
-            var i = PagerDutyApi.Instance;
+            var i = PagerDutyAPI.Instance;
             i.WaitForFirstPoll(5000);
             
             var vd = new PagerDutyModel
@@ -47,9 +50,9 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("pagerduty/incident/detail/{id}")]
-        public async Task<ActionResult> PagerDutyIncidentDetail(int id)
+        public async Task<ActionResult> IncidentDetail(int id)
         {
-            var incident = PagerDutyApi.Instance.Incidents.Data.First(i => i.Number == id);
+            var incident = PagerDutyAPI.Instance.Incidents.Data.First(i => i.Number == id);
             var vd = new PagerDutyIncidentModel
             {
                 Incident = incident,
@@ -60,9 +63,9 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("pagerduty/escalation/full")]
-        public ActionResult PagerDutyFullEscalation()
+        public ActionResult FullEscalation()
         {
-            return View("PagerDuty.EscFull", PagerDutyApi.Instance.GetSchedule());
+            return View("PagerDuty.EscFull", PagerDutyAPI.Instance.GetSchedule());
         }
     }
 }

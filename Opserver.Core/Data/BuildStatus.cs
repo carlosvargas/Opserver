@@ -9,31 +9,30 @@ namespace StackExchange.Opserver.Data
 {
     public class BuildStatus
     {
-        private static DateTime _lastFetch = DateTime.UtcNow.AddYears(-1);
         private static List<Build> _builds = new List<Build>();
         private static readonly object _fetchLock = new object();
         private static List<Build> Builds
         {
             get
             {
-                if (_lastFetch < DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds))
+                if (LastFetch < DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds))
                 {
                     lock (_fetchLock)
                     {
-                        if (_lastFetch < DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds))
+                        if (LastFetch < DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds))
                         {
-                            using (MiniProfiler.Current.Step("Get Builds since " + _lastFetch))
+                            using (MiniProfiler.Current.Step("Get Builds since " + LastFetch.ToString()))
                             {
                                 var c = GetClient();
                                 // grab all new builds with some overlap
-                                var newBuilds = c.Builds.AllSinceDate(_lastFetch.AddSeconds(-10));
+                                var newBuilds = c.Builds.AllSinceDate(LastFetch.AddSeconds(-10));
                                 if (newBuilds != null && newBuilds.Any())
                                 {
                                     // merge into the list
                                     _builds.AddRange(newBuilds.Where(b => !_builds.Any(eb => eb.Id == b.Id)));
                                     _builds = _builds.OrderBy(b => b.StartDate).ToList();
                                 }
-                                _lastFetch = DateTime.UtcNow;
+                                LastFetch = DateTime.UtcNow;
                             }
                         }
                     }
@@ -42,15 +41,10 @@ namespace StackExchange.Opserver.Data
             }
         }
 
-        public static DateTime LastFetch
-        {
-            get { return _lastFetch; }
-        }
+        public static DateTime LastFetch { get; private set; } = DateTime.UtcNow.AddYears(-1);
 
-        public static bool HasCachePrimed
-        {
-            get { return _lastFetch >= DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds); }
-        }
+        public static bool HasCachePrimed =>
+            LastFetch >= DateTime.UtcNow.AddSeconds(-Current.Settings.TeamCity.BuildFetchIntervalSeconds);
 
         public static List<BuildConfig> Configs
         {
@@ -70,16 +64,9 @@ namespace StackExchange.Opserver.Data
             }
         }
 
-        public static BuildConfig GetConfig(string buildTypeId)
-        {
-            var config = Configs.FirstOrDefault(c => c.Id == buildTypeId);
-            return config;
-        }
+        public static BuildConfig GetConfig(string buildTypeId) => Configs.FirstOrDefault(c => c.Id == buildTypeId);
 
-        public static List<Build> GetAllBuilds()
-        {
-            return Builds;
-        }
+        public static List<Build> GetAllBuilds() => Builds;
 
         public static List<Build> GetBuildsByServer(string server)
         {
@@ -94,23 +81,15 @@ namespace StackExchange.Opserver.Data
             return new List<Build>();
         }
 
-        public static List<Build> GetBuildsById(string buildTypeId)
-        {
-            return Builds.Where(b => b.BuildTypeId == buildTypeId).ToList();
-        }
+        public static List<Build> GetBuildsById(string buildTypeId) => Builds.Where(b => b.BuildTypeId == buildTypeId).ToList();
 
-        public static List<BuildConfig> GetAllBuildConfigs()
-        {
-            var c = GetClient();
-            return c.BuildConfigs.All();
-        }
+        public static List<BuildConfig> GetAllBuildConfigs() => GetClient().BuildConfigs.All();
 
         public static List<BuildConfig> GetBuildConfigsByServer(string server)
         {
             List<string> map;
             if (Current.Settings.TeamCity.ServerMaps.TryGetValue(server, out map))
             {
-                //var builds = csv.Split(StringSplits.Comma_SemiColon).ToList();
                 if(map.Any())
                 {
                     return map.Select(GetConfig).Where(c => c != null).OrderBy(b => b.Project).ThenBy(b => b.Name).ToList();
@@ -119,20 +98,14 @@ namespace StackExchange.Opserver.Data
             return new List<BuildConfig>();
         }
 
-        public static List<Project> GetAllProjects()
-        {
-            var c = GetClient();
-            return c.Projects.All();
-        }
+        public static List<Project> GetAllProjects() => GetClient().Projects.All();
 
         public static TeamCityClient GetClient()
         {
-            TeamCityClient client;
             Uri uri;
-            if (Uri.TryCreate(Current.Settings.TeamCity.Url, UriKind.Absolute, out uri))
-                client = new TeamCityClient(uri.Host, useSsl: uri.Scheme == Uri.UriSchemeHttps);
-            else
-                client = new TeamCityClient(Current.Settings.TeamCity.Url, useSsl: false);
+            var client = Uri.TryCreate(Current.Settings.TeamCity.Url, UriKind.Absolute, out uri)
+                ? new TeamCityClient(uri.Host + (uri.IsDefaultPort ? "" : ":" + uri.Port.ToString()), useSsl: uri.Scheme == Uri.UriSchemeHttps)
+                : new TeamCityClient(Current.Settings.TeamCity.Url, useSsl: false);
 
             client.Connect(Current.Settings.TeamCity.User, Current.Settings.TeamCity.Password);
             return client;

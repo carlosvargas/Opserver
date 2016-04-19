@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -14,183 +15,140 @@ namespace StackExchange.Opserver.Data
         /// Returns if this cache has data - THIS WILL NOT TRIGGER A FETCH
         /// </summary>
         public override bool ContainsData => DataBacker != null;
-        public override object GetData() { return DataBacker; }
+        internal override object InnerCache => DataBacker;
         public override Type Type => typeof (T);
+        private readonly SemaphoreSlim _pollSemaphoreSlim = new SemaphoreSlim(1);
+
+        public override string InventoryDescription
+        {
+            get
+            {
+                var tmp = DataBacker;
+                return tmp == null ? null : ((tmp as IList)?.Count.Pluralize("item") ?? "1 Item");
+            }
+        }
 
         private T DataBacker { get; set; }
         public T Data
         {
             get
             {
-                if (NeedsPoll)
+                // Only wait for stale caches that need a refresh in the background
+                // Really, this is going to exit quickly as the background refresh is kicked off.
+                if (CacheKey.HasValue() && IsStale)
                 {
-                    Poll();
+                    using (MiniProfiler.Current.Step("Cache Wait: " + CacheKey + ":" + UniqueId.ToString()))
+                    {
+                        PollAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+                    }
                 }
                 return DataBacker;
             }
-            internal set { DataBacker = value; }
         }
-        public Action<Cache<T>> UpdateCache { get; set; }
+
+        public void SetData(T data)
+        {
+            DataBacker = data;
+        }
+        public Func<Cache<T>, Task> UpdateCache { get; set; }
 
         /// <summary>
         /// If profiling for cache polls is active, this contains a MiniProfiler of the current or last poll
         /// </summary>
         public MiniProfiler Profiler { get; set; }
 
-        public override int Poll(bool force = false)
+        public override async Task<int> PollAsync(bool force = false)
         {
+            Interlocked.Increment(ref PollingEngine._activePolls);
             int result;
+            if (force) _needsPoll = true;
             if (CacheKey.HasValue())
             {
-                result = CachePoll(force);
+                if (force || (DataBacker == null && !LastPoll.HasValue))
+                {
+                    // First fetch - just poll...
+                    result = await UpdateAsync().ConfigureAwait(false);
+                }
+                else
+                {
+                    // This is intentionally background fire and forget
+#pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                    UpdateAsync().ConfigureAwait(false);
+#pragma warning restore CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
+                    result = 1;
+                }
             }
             else
             {
-                if (force) NeedsPoll = true;
-                result = Update();
+                result = await UpdateAsync().ConfigureAwait(false);
             }
+            Interlocked.Decrement(ref PollingEngine._activePolls);
             return result;
         }
 
-        private int Update()
+        private async Task<int> UpdateAsync()
         {
-            if (!NeedsPoll && !IsStale) return 0;
+            PollStatus = "UpdateAsync";
+            if (!_needsPoll && !IsStale) return 0;
 
-            if (IsPolling) return 0;
-
-            var sw = Stopwatch.StartNew();
-            IsPolling = true;
+            PollStatus = "Awaiting Semaphore";
+            await _pollSemaphoreSlim.WaitAsync().ConfigureAwait(false);
+            bool errored = false;
             try
             {
+                if (!_needsPoll && !IsStale) return 0;
+                if (_isPolling) return 0;
+                CurrentPollDuration = Stopwatch.StartNew();
+                _isPolling = true;
                 Interlocked.Increment(ref _pollsTotal);
-                UpdateCache(this);
-                LastPollStatus = LastSuccess.HasValue && LastSuccess == LastPoll
-                                     ? FetchStatus.Success
-                                     : FetchStatus.Fail;
-                NeedsPoll = false;
+                PollStatus = "UpdateCache";
+                await UpdateCache(this).ConfigureAwait(false);
+                PollStatus = "UpdateCache Complete";
+                _needsPoll = false;
                 if (DataBacker != null)
                     Interlocked.Increment(ref _pollsSuccessful);
                 return DataBacker != null ? 1 : 0;
             }
             catch (Exception e)
             {
-                ErrorMessage = e.Message;
-                if (e.InnerException != null) ErrorMessage += "\n" + e.InnerException.Message;
-                LastPollStatus = FetchStatus.Fail;
+                var errorMessage = e.Message;
+                if (e.InnerException != null) errorMessage += "\n" + e.InnerException.Message;
+                SetFail(errorMessage);
+                errored = true;
                 return 0;
             }
             finally
             {
-                IsPolling = false;
-                sw.Stop();
-                LastPollDuration = sw.Elapsed;
+                if (CurrentPollDuration != null)
+                {
+                    CurrentPollDuration.Stop();
+                    LastPollDuration = CurrentPollDuration.Elapsed;
+                }
+                CurrentPollDuration = null;
+                _isPolling = false;
+                PollStatus = errored ? "Failed" : "Completed";
+                _pollSemaphoreSlim.Release();
             }
         }
-        
-        private int CachePoll(bool force)
+
+        public static Cache<T> WithKey(
+            string key,
+            Func<Cache<T>, Task> update,
+            int cacheSeconds,
+            int cacheStaleSeconds)
         {
-            // Cache is valid, nothing to do
-            if (!force && !IsStale) return 0;
-
-            if (DataBacker != null) return 0;
-
-            Action<Cache<T>> copyPropertiesFrom = c =>
+            var result = Current.LocalCache.Get<Cache<T>>(key);
+            if (result == null)
+            {
+                result = new Cache<T>
                 {
-                    DataBacker = c.DataBacker;
-                    LastPoll = c.LastPoll;
-                    LastSuccess = c.LastSuccess;
-                    ErrorMessage = c.ErrorMessage;
+                    CacheKey = key,
+                    CacheForSeconds = cacheSeconds,
+                    UpdateCache = update
                 };
-
-            var lockKey = CacheKey;
-            var cached = Current.LocalCache.Get<Cache<T>>(CacheKey);
-            var loadLock = NullLocks.AddOrUpdate(lockKey, k => new object(), (k, old) => old);
-            if (cached == null)
-            {
-                lock (loadLock)
-                {
-                    // See if we have the value cached
-                    cached = Current.LocalCache.Get<Cache<T>>(CacheKey);
-                    if (cached == null)
-                    {
-                        // No data, run this synchronously to get data
-                        var result = Update();
-                        Current.LocalCache.Set(CacheKey, this, CacheForSeconds + CacheStaleForSeconds);
-                        return result;
-                    }
-                }
+                Current.LocalCache.Set(key, result, cacheSeconds + cacheStaleSeconds);
             }
-            // So we hit cache, copy stuff over
-            copyPropertiesFrom(cached);
-            // If we're not stale or don't cache stale, nothing else to do
-            if (!IsStale || CacheStaleForSeconds == 0) return 0;
-            // Oh no, we're stale - kick off a background refresh
-
-            var refreshLockSuccess = false;
-            if (Monitor.TryEnter(loadLock, 0))
-            {
-                try
-                {
-                    refreshLockSuccess = GotCompeteLock();
-                }
-                finally
-                {
-                    Monitor.Exit(loadLock);
-                }
-            }
-            if (refreshLockSuccess)
-            {
-                var task = new Task(() =>
-                    {
-                        lock (loadLock)
-                        {
-                            try
-                            {
-                                Update();
-                                Current.LocalCache.Set(CacheKey, this, CacheForSeconds + CacheStaleForSeconds);
-                            }
-                            finally
-                            {
-                                Current.LocalCache.Remove(CompeteKey);
-                            }
-                        }
-                    });
-                task.ContinueWith(t =>
-                    {
-                        if (t.IsFaulted) Current.LogException(t.Exception);
-                    });
-                task.Start();
-            }
-            return 0;
-        }
-
-        private bool GotCompeteLock()
-        {
-            if (!Current.LocalCache.SetNXSync(CompeteKey, DateTime.UtcNow))
-            {
-                var x = Current.LocalCache.Get<DateTime>(CompeteKey);
-                // Somebody abandoned the lock, clear it and try again
-                if (DateTime.UtcNow - x > TimeSpan.FromMinutes(5))
-                {
-                    Current.LocalCache.Remove(CompeteKey);
-                    return GotCompeteLock();
-                }
-                return false;
-            }
-            return true;
-        }
-        
-        public override void PollBackground()
-        {
-            Task.Run(() => Poll());
-        }
-
-        public override void Purge()
-        {
-            NeedsPoll = true;
-            Data = null;
-            if (CacheKey.HasValue())
-                Current.LocalCache.Remove(CacheKey);
+            return result;
         }
 
         public Cache([CallerMemberName] string memberName = "",
@@ -203,70 +161,80 @@ namespace StackExchange.Opserver.Data
         }
     }
 
-    public class Cache : IMonitorStatus
+    public abstract class Cache : IMonitorStatus
     {
         /// <summary>
         /// Unique key for caching, only used for items that are on-demand, e.g. methods that have cache based on parameters
         /// </summary>
-        public string CacheKey { get; set; }
-        protected string CompeteKey => CacheKey + "-compete";
-        public int? CacheFailureForSeconds { get; set; }
+        protected string CacheKey { get; set; }
+        public int? CacheFailureForSeconds { get; set; } = 15;
         public int CacheForSeconds { get; set; }
-        public int CacheStaleForSeconds { get; set; }
         public bool AffectsNodeStatus { get; set; }
         public virtual Type Type => typeof(Cache);
-        public Guid UniqueId { get; private set; }
+        public Guid UniqueId { get; }
+        
+        public bool ShouldPoll => _needsPoll || IsStale && !_isPolling;
 
-        internal bool NeedsPoll = true;
-        private volatile bool _isPolling;
-        public bool IsPolling { get { return _isPolling; } internal set { _isPolling = value; } }
-        public bool IsStale => NextPoll < DateTime.UtcNow;
-        public bool IsExpired => LastPoll.AddSeconds(CacheForSeconds + CacheStaleForSeconds) < DateTime.UtcNow;
+        internal volatile bool _needsPoll = true;
+        protected volatile bool _isPolling;
+        public bool IsPolling => _isPolling;
+        public bool IsStale => (NextPoll ?? DateTime.MinValue) < DateTime.UtcNow;
+        public DateTime? NextPoll =>
+            LastPoll?.AddSeconds(LastPollSuccessful
+                ? CacheForSeconds
+                : CacheFailureForSeconds.GetValueOrDefault(CacheForSeconds));
 
         protected long _pollsTotal, _pollsSuccessful;
         public long PollsTotal => _pollsTotal;
         public long PollsSuccessful => _pollsSuccessful;
-        public DateTime LastPoll { get; internal set; }
 
-        public DateTime NextPoll =>
-            LastPoll.AddSeconds(LastPollStatus == FetchStatus.Fail
-                ? CacheFailureForSeconds.GetValueOrDefault(CacheForSeconds)
-                : CacheForSeconds);
-
-        public TimeSpan LastPollDuration { get; internal set; }
+        public Stopwatch CurrentPollDuration { get; protected set; }
+        public DateTime? LastPoll { get; internal set; }
+        public TimeSpan? LastPollDuration { get; internal set; }
         public DateTime? LastSuccess { get; internal set; }
-        public FetchStatus LastPollStatus { get; set; }
+        public bool LastPollSuccessful { get; internal set; }
+        
+        internal void SetSuccess()
+        {
+            LastSuccess = LastPoll = DateTime.UtcNow;
+            LastPollSuccessful = true;
+            ErrorMessage = "";
+        }
+
+        internal void SetFail(string errorMessage)
+        {
+            LastPoll = DateTime.UtcNow;
+            LastPollSuccessful = false;
+            ErrorMessage = errorMessage;
+        }
+        public string PollStatus { get; internal set; }
+
         public MonitorStatus MonitorStatus
         {
             get
             {
-                if (LastPoll == DateTime.MinValue) return MonitorStatus.Unknown;
-                return LastPollStatus == FetchStatus.Fail ? MonitorStatus.Critical : MonitorStatus.Good;
+                if (LastPoll == null ) return MonitorStatus.Unknown;
+                return LastPollSuccessful ? MonitorStatus.Good : MonitorStatus.Critical;
             }
         }
         public string MonitorStatusReason
         {
             get
             {
-                if (LastPoll == DateTime.MinValue) return "Never Polled";
-                return LastPollStatus == FetchStatus.Fail ? "Poll " + LastPoll.ToRelativeTime() + " failed: " + ErrorMessage : null;
+                if (LastPoll == null) return "Never Polled";
+                return !LastPollSuccessful ? "Poll " + LastPoll?.ToRelativeTime() + " failed: " + ErrorMessage : null;
             }
         }
 
         protected static readonly ConcurrentDictionary<string, object> NullLocks = new ConcurrentDictionary<string, object>();
+        protected static readonly ConcurrentDictionary<string, SemaphoreSlim> NullSlims = new ConcurrentDictionary<string, SemaphoreSlim>();
         
         public virtual bool ContainsData => false;
-        public virtual object GetData() { return null; }
+        internal virtual object InnerCache => null;
         public string ErrorMessage { get; internal set; }
+        public virtual string InventoryDescription => null;
 
-        public virtual int Poll(bool force = false)
-        {
-            return 0;
-        }
-
-        public virtual void PollBackground() { }
-
-        public virtual void Purge() { }
+        public abstract Task<int> PollAsync(bool force = false);
 
         /// <summary>
         /// Info for monitoring the monitoring, debugging, etc.
@@ -274,7 +242,8 @@ namespace StackExchange.Opserver.Data
         public string ParentMemberName { get; protected set; }
         public string SourceFilePath { get; protected set; }
         public int SourceLineNumber { get; protected set; }
-        public Cache([CallerMemberName] string memberName = "",
+
+        protected Cache([CallerMemberName] string memberName = "",
                      [CallerFilePath] string sourceFilePath = "",
                      [CallerLineNumber] int sourceLineNumber = 0)
         {

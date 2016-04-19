@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Text;
 using StackExchange.Opserver.Data.Dashboard.Providers;
 
 namespace StackExchange.Opserver.Data.Dashboard
@@ -20,10 +18,11 @@ namespace StackExchange.Opserver.Data.Dashboard
         public string Name { get; internal set; }
         public DateTime? LastSync { get; internal set; }
         public string MachineType { get; internal set; }
+        public string MachineTypePretty => MachineType?.Replace("Microsoft Windows ", "");
         public string Ip { get; internal set; }
         public short? PollIntervalSeconds { get; internal set; }
 
-        public DateTime LastBoot { get; internal set; }
+        public DateTime? LastBoot { get; internal set; }
         public NodeStatus Status { get; internal set; }
 
         public short? CPULoad { get; internal set; }
@@ -32,8 +31,6 @@ namespace StackExchange.Opserver.Data.Dashboard
         public string VMHostID { get; internal set; }
         public bool IsVMHost { get; internal set; }
         public bool IsUnwatched { get; internal set; }
-        public DateTime? UnwatchedFrom { get; internal set; }
-        public DateTime? UnwatchedUntil { get; internal set; }
 
         public string Manufacturer { get; internal set; }
         public string Model { get; internal set; }
@@ -41,7 +38,7 @@ namespace StackExchange.Opserver.Data.Dashboard
         public Version KernelVersion { get; internal set; }
         
         public string PrettyName => (Name ?? "").ToUpper();
-        public TimeSpan UpTime => DateTime.UtcNow - LastBoot;
+        public TimeSpan? UpTime => DateTime.UtcNow - LastBoot;
         public MonitorStatus MonitorStatus => Status.ToMonitorStatus();
 
         // TODO: Implement
@@ -69,7 +66,7 @@ namespace StackExchange.Opserver.Data.Dashboard
             {
                 if (_searchString == null)
                 {
-                    var result = new StringBuilder();
+                    var result = StringBuilderCache.Get();
                     const string delim = "-";
                     result.Append(MachineType)
                           .Append(delim)
@@ -96,7 +93,7 @@ namespace StackExchange.Opserver.Data.Dashboard
                         result.Append(delim)
                               .Append(string.Join(",", VMs));
 
-                    _searchString = result.ToString().ToLower();
+                    _searchString = result.ToStringRecycle().ToLower();
                 }
                 return _searchString;
             }
@@ -113,7 +110,9 @@ namespace StackExchange.Opserver.Data.Dashboard
         public Volume GetVolume(string id) => Volumes.FirstOrDefault(v => v.Id == id);
         public Application GetApp(string id) => Apps.FirstOrDefault(a => a.Id == id);
 
-        public List<IPAddress> IPs { get; internal set; }
+        private static readonly List<IPNet> EmptyIPs = new List<IPNet>(); 
+
+        public List<IPNet> IPs => Interfaces?.SelectMany(i => i.IPs).ToList() ?? EmptyIPs;
 
         public float? PercentMemoryUsed => MemoryUsed * 100 / TotalMemory;
 
@@ -129,15 +128,13 @@ namespace StackExchange.Opserver.Data.Dashboard
         {
             get
             {
-                if (_primaryInterfaces == null)
+                if (_primaryInterfaces == null || (_primaryInterfaces.Count == 0 && Interfaces?.Count > 0))
                 {
-                    var s = Settings;
-                    var dbInterfaces = s?.PrimaryInterfacePatternRegex != null
-                        ? Interfaces.Where(i => s.PrimaryInterfacePatternRegex.IsMatch(i.FullName.IsNullOrEmptyReturn(i.Name))).ToList()
-                        : Interfaces.Where(i => i.IsLikelyPrimary).ToList();
+                    var pattern = Settings?.PrimaryInterfacePatternRegex;
+                    var dbInterfaces = Interfaces.Where(i => i.IsLikelyPrimary(pattern)).ToList();
                     _primaryInterfaces = (dbInterfaces.Any()
-                                              ? dbInterfaces.OrderBy(i => i.Name)
-                                              : Interfaces.OrderByDescending(i => i.InBps + i.OutBps)).ToList();
+                        ? dbInterfaces.OrderBy(i => i.Name)
+                        : Interfaces.OrderByDescending(i => i.InBps + i.OutBps)).ToList();
                 }
                 return _primaryInterfaces;
             }

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Net;
-using System.Web.WebPages;
 using System.Web.Mvc;
 using Jil;
 using StackExchange.Opserver.Views.Shared;
@@ -14,8 +13,8 @@ namespace StackExchange.Opserver.Controllers
     [OnlyAllow(Roles.Authenticated)]
     public partial class StatusController : Controller
     {
-        protected virtual ISecurableSection SettingsSection => null;
-        protected virtual string TopTab => null;
+        public virtual ISecurableSection SettingsSection => null;
+        public virtual TopTab TopTab => null;
 
         private IDisposable _betweenInitializeAndActionExecuting,
                             _betweenActionExecutingAndExecuted,
@@ -27,7 +26,7 @@ namespace StackExchange.Opserver.Controllers
         
         protected override void Initialize(System.Web.Routing.RequestContext requestContext)
         {
-            _betweenInitializeAndActionExecuting = _startStep("Initialize");
+            _betweenInitializeAndActionExecuting = _startStep(nameof(Initialize));
             base.Initialize(requestContext);
         }
 
@@ -36,8 +35,8 @@ namespace StackExchange.Opserver.Controllers
             if (!filterContext.IsChildAction)
             {
                 _stopStep(_betweenInitializeAndActionExecuting);
-                _betweenActionExecutingAndExecuted = _startStep("OnActionExecuting");
-                TopTabs.CurrentTab = TopTab;
+                _betweenActionExecutingAndExecuted = _startStep(nameof(OnActionExecuting));
+                TopTabs.SetCurrent(filterContext.Controller.GetType());
             }
 
             var iSettings = SettingsSection as Settings;
@@ -52,7 +51,7 @@ namespace StackExchange.Opserver.Controllers
             if (!filterContext.IsChildAction)
             {
                 _stopStep(_betweenActionExecutingAndExecuted);
-                _betweenActionExecutedAndResultExecuting = _startStep("OnActionExecuted");
+                _betweenActionExecutedAndResultExecuting = _startStep(nameof(OnActionExecuted));
             }
             base.OnActionExecuted(filterContext);
         }
@@ -61,7 +60,7 @@ namespace StackExchange.Opserver.Controllers
             if (!filterContext.IsChildAction)
             {
                 _stopStep(_betweenActionExecutedAndResultExecuting);
-                _betweenResultExecutingAndExecuted = _startStep("OnResultExecuting");
+                _betweenResultExecutingAndExecuted = _startStep(nameof(OnResultExecuting));
             }
             base.OnResultExecuting(filterContext);
         }
@@ -70,7 +69,7 @@ namespace StackExchange.Opserver.Controllers
         {
             _stopStep(_betweenResultExecutingAndExecuted);
 
-            using (MiniProfiler.Current.Step("OnResultExecuted"))
+            using (MiniProfiler.Current.Step(nameof(OnResultExecuted)))
             {
                 base.OnResultExecuted(filterContext);
             }
@@ -81,29 +80,25 @@ namespace StackExchange.Opserver.Controllers
             var s = Current.Settings;
 
             if (s.Dashboard.Enabled && s.Dashboard.HasAccess())
-                return RedirectToAction("Dashboard", "Dashboard");
+                return RedirectToAction(nameof(DashboardController.Dashboard), "Dashboard");
             if (s.SQL.Enabled && s.SQL.HasAccess())
-                return RedirectToAction("Dashboard", "SQL");
+                return RedirectToAction(nameof(SQLController.Dashboard), "SQL");
             if (s.Redis.Enabled && s.Redis.HasAccess())
-                return RedirectToAction("Dashboard", "Redis");
+                return RedirectToAction(nameof(RedisController.Dashboard), "Redis");
             if (s.Elastic.Enabled && s.Elastic.HasAccess())
-                return RedirectToAction("Dashboard", "Elastic");
+                return RedirectToAction(nameof(ElasticController.Dashboard), "Elastic");
             if (s.Exceptions.Enabled && s.Exceptions.HasAccess())
-                return RedirectToAction("Exceptions", "Exceptions");
+                return RedirectToAction(nameof(ExceptionsController.Exceptions), "Exceptions");
             if (s.HAProxy.Enabled && s.HAProxy.HasAccess())
-                return RedirectToAction("HAProxyDashboard", "HAProxy");
+                return RedirectToAction(nameof(HAProxyController.Dashboard), "HAProxy");
 
             return View("NoConfiguration");
         }
-
-        [Route("change-view")]
-        public RedirectResult SwitchView(bool mobile)
+        
+        [Route("no-config")]
+        public ViewResult NoConfig()
         {
-            if (Request.Browser.IsMobileDevice == mobile)
-                HttpContext.ClearOverriddenBrowser();
-            else
-                HttpContext.SetOverriddenBrowser(mobile ? BrowserOverride.Mobile : BrowserOverride.Desktop);
-            return Redirect(Request.UrlReferrer.PathAndQuery);
+            return View("NoConfiguration");
         }
 
         [Route("404")]
@@ -124,16 +119,23 @@ namespace StackExchange.Opserver.Controllers
         {
             if (Current.User.IsAnonymous)
             {
-                return Redirect("/login?ReturnUrl=" + Request.Url.PathAndQuery.UrlEncode());
+                return RedirectToAction(nameof(LoginController.Login), "Login", new { returnUrl = Request.Url?.PathAndQuery });
             }
 
             Response.StatusCode = (int)HttpStatusCode.Forbidden;
             return View("~/Views/Shared/AccessDenied.cshtml");
         }
 
+        [Route("error")]
+        public ActionResult ErrorPage()
+        {
+            Response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            return View("Error");
+        }
+
         public void SetTitle(string title)
         {
-            title = HtmlUtilities.Encode(title);
+            title = title.HtmlEncode();
             var pageTitle = string.IsNullOrEmpty(title) ? SiteSettings.SiteName : string.Concat(title, " - ", SiteSettings.SiteName);
             ViewData[ViewDataKeys.PageTitle] = pageTitle;
         }
@@ -169,31 +171,38 @@ namespace StackExchange.Opserver.Controllers
             return new ContentResult { Content = content?.ToString(), ContentType = "application/json" };
         }
 
-        public new JsonNetResult Json(object data)
+        protected JsonResult Json<T>(T data)
         {
-            return new JsonNetResult { Data = data, JsonRequestBehavior = JsonRequestBehavior.AllowGet };
+            return new JsonJilResult<T> { Data = data, JsonRequestBehavior = JsonRequestBehavior.AllowGet };
         }
 
-        protected JsonResult JsonNotFound(object toSerialize = null)
+        protected JsonResult JsonNotFound()
+        {
+            Response.StatusCode = (int)HttpStatusCode.NotFound;
+            return Json<object>(null);
+        }
+
+        protected JsonResult JsonNotFound<T>(T toSerialize = default(T))
         {
             Response.StatusCode = (int)HttpStatusCode.NotFound;
             return Json(toSerialize);
         }
 
-        protected JsonNetResult JsonError(string message, HttpStatusCode? status = null)
+        protected JsonResult JsonError(string message, HttpStatusCode? status = null)
         {
             Response.StatusCode = (int)(status ?? HttpStatusCode.InternalServerError);
             return Json(new { ErrorMessage = message });
         }
 
-        protected JsonNetResult JsonError(object toSerialize, HttpStatusCode? status = null)
+        protected JsonResult JsonError<T>(T toSerialize, HttpStatusCode? status = null)
         {
             Response.StatusCode = (int)(status ?? HttpStatusCode.InternalServerError);
             return Json(toSerialize);
         }
 
-        public class JsonNetResult : JsonResult
+        public class JsonJilResult<T> : JsonResult
         {
+            public new T Data { get; set; }
             public override void ExecuteResult(ControllerContext context)
             {
                 if (context == null)

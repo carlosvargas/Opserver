@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Threading.Tasks;
 
 namespace StackExchange.Opserver.Data.Dashboard.Providers
 {
@@ -9,11 +10,20 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
     {
         private readonly WMISettings _config;
         private readonly List<WmiNode> _wmiNodes;
+        private readonly Dictionary<string, WmiNode> _wmiNodeLookup;
 
         public WmiDataProvider(WMISettings settings) : base(settings)
         {
             _config = settings;
-            _wmiNodes = InitNodeList(_config.Nodes).OrderBy(x => x.OriginalName).ToList();
+            _wmiNodes = InitNodeList(_config.Nodes).OrderBy(x => x.Endpoint).ToList();
+            // Do this ref cast list once
+            AllNodes = _wmiNodes.Cast<Node>().ToList();
+            // For fast lookups
+            _wmiNodeLookup = new Dictionary<string, WmiNode>(_wmiNodes.Count);
+            foreach(var n in _wmiNodes)
+            {
+                _wmiNodeLookup[n.Id] = n;
+            }
         }
 
         /// <summary>
@@ -23,15 +33,15 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
         private IEnumerable<WmiNode> InitNodeList(IList<string> names)
         {
             var nodesList = new List<WmiNode>(names.Count);
+            var exclude = Current.Settings.Dashboard.ExcludePatternRegex;
             foreach (var nodeName in names)
             {
-                var node = new WmiNode
+                if (exclude?.IsMatch(nodeName) ?? false) continue;
+
+                var node = new WmiNode(nodeName)
                 {
                     Config = _config,
-                    Id = nodeName.ToLower(),
-                    Name = nodeName.ToLower(),
-                    DataProvider = this,
-                    MachineType = "Windows"
+                    DataProvider = this
                 };
 
                 try
@@ -53,7 +63,7 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                 }
 
                 var staticDataCache = ProviderCache(
-                    () => node.PollNodeInfo(), 
+                    () => node.PollNodeInfoAsync(), 
                     _config.StaticDataTimeoutSeconds,
                     memberName: node.Name + "-Static");
                 node.Caches.Add(staticDataCache);
@@ -64,11 +74,17 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
                     memberName: node.Name + "-Dynamic"));
 
                 //Force update static host data, incuding os info, volumes, interfaces.
-                staticDataCache.Poll(true);
+                Task.WaitAll(staticDataCache.PollAsync(true));
 
                 nodesList.Add(node);
             }
             return nodesList;
+        }
+
+        private WmiNode GetWmiNodeById(string id)
+        {
+            WmiNode n;
+            return _wmiNodeLookup.TryGetValue(id, out n) ? n : null;
         }
 
         public override int MinSecondsBetweenPolls => 10;
@@ -86,6 +102,6 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
 
         public override bool HasData => DataPollers.Any(x => x.HasData());
 
-        public override List<Node> AllNodes => _wmiNodes.Cast<Node>().ToList();
+        public override List<Node> AllNodes { get; }
     }
 }

@@ -22,7 +22,7 @@ namespace StackExchange.Opserver.Data
             protected override JsonProperty CreateProperty(System.Reflection.MemberInfo member, MemberSerialization memberSerialization)
             {
                 var property = base.CreateProperty(member, memberSerialization);
-                if (typeof(ISQLVersionedObject).IsAssignableFrom(property.DeclaringType) && property.PropertyName == "MinVersion")
+                if (typeof(ISQLVersioned).IsAssignableFrom(property.DeclaringType) && property.PropertyName == nameof(ISQLVersioned.MinVersion))
                 {
                     property.ShouldSerialize = i => false;
                 }
@@ -86,9 +86,9 @@ namespace StackExchange.Opserver.Data
         public class CacheData
         {
             public string Name;
-            public DateTime LastPolled;
+            public DateTime? LastPolled;
             public DateTime? LastSuccess;
-            public double LastPollDurationMS;
+            public double? LastPollDurationMs;
             [JsonProperty(NullValueHandling = NullValueHandling.Ignore, DefaultValueHandling = DefaultValueHandling.Ignore)]
             public string LastPollError;
             public bool HasData;
@@ -102,10 +102,10 @@ namespace StackExchange.Opserver.Data
                     Name = cache.ParentMemberName,
                     LastPolled = cache.LastPoll,
                     LastSuccess = cache.LastSuccess,
-                    LastPollDurationMS = cache.LastPollDuration.TotalMilliseconds,
+                    LastPollDurationMs = cache.LastPollDuration?.TotalMilliseconds,
                     LastPollError = cache.ErrorMessage.HasValue() ? cache.ErrorMessage : null,
                     HasData = cache.HasData(),
-                    Data = includeData ? cache.GetData() : null
+                    Data = includeData ? cache.InnerCache : null
                 };
             }
         }

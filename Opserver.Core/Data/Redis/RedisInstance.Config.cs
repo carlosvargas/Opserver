@@ -15,12 +15,12 @@ namespace StackExchange.Opserver.Data.Redis
                 return _config ?? (_config = new Cache<Dictionary<string, string>>
                 {
                     CacheForSeconds = 120,
-                    UpdateCache = GetFromRedisAsync("Config", async rc =>
+                    UpdateCache = GetFromRedisAsync(nameof(Config), async rc =>
                     {
                         //TODO: Remove when StackExchange.Redis gets profiling
                         using (MiniProfiler.Current.CustomTiming("redis", "CONFIG"))
                         {
-                            return (await rc.GetSingleServer().ConfigGetAsync("*")).ToDictionary(x => x.Key, x => x.Value);
+                            return (await rc.GetSingleServer().ConfigGetAsync("*").ConfigureAwait(false)).ToDictionary(x => x.Key, x => x.Value);
                         }
                     })
                 });

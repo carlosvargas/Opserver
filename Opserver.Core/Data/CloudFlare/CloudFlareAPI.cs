@@ -10,11 +10,13 @@ namespace StackExchange.Opserver.Data.CloudFlare
 {
     public partial class CloudFlareAPI : SinglePollNode<CloudFlareAPI>
     {
+        private const string APIBaseUrl = "https://api.cloudflare.com/client/v4/";
+
         public CloudFlareSettings Settings { get; internal set; }
         public string Email => Settings.Email;
         public string APIKey => Settings.APIKey;
 
-        public override string NodeType => "CloudFlareAPI";
+        public override string NodeType => nameof(CloudFlareAPI);
         public override int MinSecondsBetweenPolls => 5;
 
         private static readonly Options JilOptions = Options.ISO8601;
@@ -36,13 +38,11 @@ namespace StackExchange.Opserver.Data.CloudFlare
             Settings = Current.Settings.CloudFlare;
         }
 
-        public Action<Cache<T>> CloudFlareFetch<T>(string opName, Func<CloudFlareAPI, Task<T>> get) where T : class
+        public Func<Cache<T>, Task> CloudFlareFetch<T>(string opName, Func<CloudFlareAPI, Task<T>> get) where T : class
         {
             return UpdateCacheItem("CloudFlare - API: " + opName, () => get(this), logExceptions: true);
         }
         
-        const string apiBaseUrl = "https://api.cloudflare.com/client/v4/";
-
         /// <summary>
         /// Gets a response from the CloudFlare API via GET
         /// </summary>
@@ -53,8 +53,8 @@ namespace StackExchange.Opserver.Data.CloudFlare
         {
             using (var wc = GetWebClient())
             {
-                var url = new Uri($"{apiBaseUrl}{path}{(values != null ? "?" + values : "")}");
-                var rawResult = await wc.DownloadStringTaskAsync(url);
+                var url = new Uri($"{APIBaseUrl}{path}{(values != null ? "?" + values : "")}");
+                var rawResult = await wc.DownloadStringTaskAsync(url).ConfigureAwait(false);
                 return JSON.Deserialize<CloudFlareResult<T>>(rawResult, JilOptions).Result;
             }
         }
@@ -75,20 +75,19 @@ namespace StackExchange.Opserver.Data.CloudFlare
         /// <returns>The CloudFlare API response</returns>
         public T Delete<T>(string path, NameValueCollection values = null) => Action<T>("DELETE", path, values);
 
-        private T Action<T>(string method, string path, NameValueCollection values = null)
+        private T Action<T>(string method, string path, NameValueCollection values)
         {
             using (var wc = GetWebClient())
             {
-                var url = new Uri($"{apiBaseUrl}{path}");
+                var url = new Uri($"{APIBaseUrl}{path}");
                 var rawResult = wc.UploadValues(url, method, values);
                 var resultString = Encoding.ASCII.GetString(rawResult);
                 return JSON.Deserialize<T>(resultString, JilOptions);
             }
         }
 
-        private WebClient GetWebClient(string contentType = "application/json")
-        {
-            return new WebClient
+        private WebClient GetWebClient(string contentType = "application/json") =>
+            new WebClient
             {
                 Headers =
                 {
@@ -97,7 +96,6 @@ namespace StackExchange.Opserver.Data.CloudFlare
                     ["Content-Type"] = contentType
                 }
             };
-        }
 
         public override string ToString() => string.Concat("CloudFlare API: ", Email);
     }

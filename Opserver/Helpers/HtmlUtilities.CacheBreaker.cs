@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Web;
+using System.Web.Hosting;
 using System.Web.Mvc;
 
 namespace StackExchange.Opserver.Helpers
@@ -25,16 +26,16 @@ namespace StackExchange.Opserver.Helpers
         /// <returns></returns>
         public static string GetCacheBreakerUrl(string path)
         {
-            return _cacheBreakerUrls.GetOrAdd(path, CalculateCacheBreakerUrl);
+            return CacheBreakerUrls.GetOrAdd(path, CalculateCacheBreakerUrl);
         }
 
         internal static IEnumerable<KeyValuePair<string, string>> GetAllCacheBreakerUrls()
         {
-            return _cacheBreakerUrls.ToList();
+            return CacheBreakerUrls.ToList();
         }
 
-        private static readonly ConcurrentDictionary<string, string> _cacheBreakers = new ConcurrentDictionary<string, string>();
-        private static readonly ConcurrentDictionary<string, string> _cacheBreakerUrls = new ConcurrentDictionary<string, string>();
+        private static readonly ConcurrentDictionary<string, string> CacheBreakers = new ConcurrentDictionary<string, string>();
+        private static readonly ConcurrentDictionary<string, string> CacheBreakerUrls = new ConcurrentDictionary<string, string>();
 
         private static string CalculateCacheBreakerUrl(string path)
         {
@@ -47,8 +48,13 @@ namespace StackExchange.Opserver.Helpers
             }
             else
                 file = path;
-
+            
             var breaker = GetCacheBreakerForLocalFile(file);
+            
+            if (path.StartsWith("~/"))
+                path = HostingEnvironment.ApplicationVirtualPath == "/"
+                    ? path.Substring(1)
+                    : HostingEnvironment.ApplicationVirtualPath + "/" + path.Substring(2);
 
             if (breaker == null)
                 return path;
@@ -63,12 +69,14 @@ namespace StackExchange.Opserver.Helpers
         /// <param name="path">The path to the file, relative to the application directory (this will usually start with "/content")</param>
         internal static string GetCacheBreakerForLocalFile(string path)
         {
-            return _cacheBreakers.GetOrAdd(path, CalculateBreaker);
+            return CacheBreakers.GetOrAdd(path, CalculateBreaker);
         }
 
         private static string CalculateBreaker(string path)
         {
-            var fullpath = AppDomain.CurrentDomain.BaseDirectory + path;
+            var fullpath =  path.StartsWith("~/")
+                ? HostingEnvironment.MapPath(path)
+                : AppDomain.CurrentDomain.BaseDirectory + path;
             if (!File.Exists(fullpath))
                 return null;
 
@@ -77,10 +85,10 @@ namespace StackExchange.Opserver.Helpers
             return hash.Substring(0, 12);
         }
 
-        private static String ToHex(byte[] buffer)
+        private static string ToHex(byte[] buffer)
         {
             var bits = buffer.Select(b => b.ToString("x2")).ToArray();
-            return String.Join("", bits);
+            return string.Join("", bits);
         }
     }
 }

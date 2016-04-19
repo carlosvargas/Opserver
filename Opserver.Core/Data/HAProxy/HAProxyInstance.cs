@@ -39,7 +39,7 @@ namespace StackExchange.Opserver.Data.HAProxy
         }
         protected override string GetMonitorStatusReason()
         {
-            if (Proxies.Data == null) return Name + ": No Proxy Data Available";
+            if (Proxies.Data == null) return Name + ": No Data";
 
             var statuses = Proxies.Data
                 .SelectMany(p => p.Servers)
@@ -55,15 +55,10 @@ namespace StackExchange.Opserver.Data.HAProxy
         }
 
         public HAProxyInstance(HAProxySettings.Instance instance, HAProxySettings.Group group = null)
-            : base(instance.Name + ":" + instance.Description + " - " + instance.Url.GetHashCode())
+            : base(instance.Name + ":" + instance.Description + " - " + instance.Url)
         {
             RawSettings = instance;
             Settings = Current.Settings.HAProxy.GetInstanceSettings(instance, group);
-        }
-
-        public void PurgeCache()
-        {
-            Proxies.Purge();
         }
 
         private Cache<List<Proxy>> _proxies;
@@ -76,7 +71,7 @@ namespace StackExchange.Opserver.Data.HAProxy
                         CacheForSeconds = 10,
                         UpdateCache = UpdateCacheItem(
                             description: "HAProxy Fetch: " + Name,
-                            getData: FetchHAProxyStats,
+                            getData: FetchHAProxyStatsAsync,
                             addExceptionData:
                                 e =>
                                 e.AddLoggedData("Server", Name)
@@ -86,41 +81,37 @@ namespace StackExchange.Opserver.Data.HAProxy
             }
         }
 
-        private async Task<List<Proxy>> FetchHAProxyStats()
+        private async Task<List<Proxy>> FetchHAProxyStatsAsync()
         {
             var fetchUrl = Url + ";csv";
             using (MiniProfiler.Current.CustomTiming("http", fetchUrl, "GET"))
             {
-                string csv;
                 var req = (HttpWebRequest) WebRequest.Create(fetchUrl);
                 req.Credentials = new NetworkCredential(User, Password);
                 if (QueryTimeoutMs.HasValue)
                     req.Timeout = QueryTimeoutMs.Value;
-                using (var resp = await req.GetResponseAsync())
+                using (var resp = await req.GetResponseAsync().ConfigureAwait(false))
                 using (var rs = resp.GetResponseStream())
                 {
                     if (rs == null) return null;
-                    using (var sr = new StreamReader(rs))
-                    {
-                        csv = sr.ReadToEnd();
-                    }
+                    return await ParseHAProxyStats(rs).ConfigureAwait(false);
                 }
-                return ParseHAProxyStats(csv);
             }
         }
 
-        private List<Proxy> ParseHAProxyStats(string input)
+        private async Task<List<Proxy>> ParseHAProxyStats(Stream stream)
         {
-            if (string.IsNullOrEmpty(input)) return new List<Proxy>();
-            var lines = input.Split(StringSplits.NewLine);
-
             var stats = new List<Item>();
-            foreach (var l in lines)
+            using (var sr = new StreamReader(stream))
             {
-                //Skip the header
-                if (string.IsNullOrEmpty(l) || l.StartsWith("#")) continue;
-                //Collect each stat line as we go, group later
-                stats.Add(Item.FromLine(l));
+                string line;
+                while ((line = await sr.ReadLineAsync().ConfigureAwait(false)) != null)
+                {
+                    //Skip the header
+                    if (line.IsNullOrEmpty() || line.StartsWith("#")) continue;
+                    //Collect each stat line as we go, group later
+                    stats.Add(Item.FromLine(line));
+                }
             }
             var result = stats.GroupBy(s => s.UniqueProxyId).Select(g => new Proxy
             {
@@ -135,9 +126,17 @@ namespace StackExchange.Opserver.Data.HAProxy
             return result;
         }
 
-        public override string ToString()
+        public override string ToString() => string.Concat(Name, ": ", Url);
+
+        public override int GetHashCode()
         {
-            return string.Concat(Name, ": ", Url);
+            int key = 17;
+            unchecked
+            {
+                key = key * 23 + Name.GetHashCode();
+                key = key * 23 + Url.GetHashCode();
+            }
+            return key;
         }
 
         #region Test Data

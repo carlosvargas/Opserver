@@ -15,29 +15,29 @@ namespace StackExchange.Opserver.Data.SQL
         /// <summary>
         /// Enables or disables an agent job
         /// </summary>
-        public async Task<bool> ToggleJobAsync(Guid jobId, bool enabled)
+        public Task<bool> ToggleJobAsync(Guid jobId, bool enabled)
         {
-            return await ExecJobAction(conn => conn.ExecuteAsync("msdb.dbo.sp_update_job", new { job_id = jobId, enabled = enabled ? 1 : 0 }, commandType: CommandType.StoredProcedure));
+            return ExecJobActionAsync(conn => conn.ExecuteAsync("msdb.dbo.sp_update_job", new { job_id = jobId, enabled = enabled ? 1 : 0 }, commandType: CommandType.StoredProcedure));
         }
 
-        public async Task<bool> StartJobAsync(Guid jobId)
+        public Task<bool> StartJobAsync(Guid jobId)
         {
-            return await ExecJobAction(conn => conn.ExecuteAsync("msdb.dbo.sp_start_job", new { job_id = jobId }, commandType: CommandType.StoredProcedure));    
+            return ExecJobActionAsync(conn => conn.ExecuteAsync("msdb.dbo.sp_start_job", new { job_id = jobId }, commandType: CommandType.StoredProcedure));    
         }
 
-        public async Task<bool> StopJobAsync(Guid jobId)
+        public Task<bool> StopJobAsync(Guid jobId)
         {
-            return await ExecJobAction(conn => conn.ExecuteAsync("msdb.dbo.sp_stop_job", new { job_id = jobId }, commandType: CommandType.StoredProcedure));
+            return ExecJobActionAsync(conn => conn.ExecuteAsync("msdb.dbo.sp_stop_job", new { job_id = jobId }, commandType: CommandType.StoredProcedure));
         }
 
-        private async Task<bool> ExecJobAction(Func<DbConnection, Task<int>> action)
+        private async Task<bool> ExecJobActionAsync(Func<DbConnection, Task<int>> action)
         {
             try
             {
-                using (var conn = await GetConnectionAsync())
+                using (var conn = await GetConnectionAsync().ConfigureAwait(false))
                 {
-                    await action(conn);
-                    JobSummary.Purge();
+                    await action(conn).ConfigureAwait(false);
+                    await JobSummary.PollAsync(true).ConfigureAwait(false);
                     return true;
                 }
             }
@@ -46,10 +46,9 @@ namespace StackExchange.Opserver.Data.SQL
                 Current.LogException(e);
                 return false;
             }
-            
         }
 
-        public class SQLJobInfo : ISQLVersionedObject, IMonitorStatus
+        public class SQLJobInfo : ISQLVersioned, IMonitorStatus
         {
             public Version MinVersion => SQLServerVersions.SQL2005.RTM;
 
@@ -112,8 +111,8 @@ namespace StackExchange.Opserver.Data.SQL
             public DateTime? NextRunDate { get; internal set; }
 
             public TimeSpan? LastRunDuration => LastRunDurationSeconds.HasValue ? TimeSpan.FromSeconds(LastRunDurationSeconds.Value) : (TimeSpan?)null;
-
-            internal const string FetchSQL = @"
+            
+            public string GetFetchSQL(Version v) => @"
 Select j.job_id JobId,
        j.name Name,
        j.description Description,
@@ -151,12 +150,8 @@ Select j.job_id JobId,
        Left Join msdb.dbo.sysjobsteps s
          On ja.job_id = s.job_id
          And ja.last_executed_step_id = s.step_id
-Order By j.name, LastStartDate";
-
-            public string GetFetchSQL(Version v)
-            {
-                return FetchSQL;
-            }
+Order By j.name, LastStartDate
+";
         }
     }
 }

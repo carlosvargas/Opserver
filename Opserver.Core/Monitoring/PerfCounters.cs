@@ -11,36 +11,24 @@ namespace StackExchange.Opserver.Monitoring
     {
         public class Windows
         {
-            //public static QueryResult<SystemUtilization> GetSystemUtilization(string machineName)
-            //{
-            //    var pc = new PerformanceCounter()
-
-            //    //return Query(machineName,
-            //    //             "select Name, PercentProcessorTime from Win32_PerfFormattedData_PerfOS_Processor",
-            //    //             results => results.Select(mo => new SystemUtilization
-            //    //             {
-            //    //                 Name = mo["Name"].ToString() == "_Total" ? "Total" : mo["Name"].ToString(),
-            //    //                 Utilization = (UInt64)mo["PercentProcessorTime"]
-            //    //             }));
-            //}
             public static Task<QueryResult<CPUUtilization>> GetCPUUtilization(string machineName)
             {
-                return Query(machineName,
+                return QueryAsync(machineName,
                              "select Name, PercentProcessorTime from Win32_PerfFormattedData_PerfOS_Processor",
                              results => results.Select(mo => new CPUUtilization
                                  {
                                      Name = mo["Name"].ToString() == "_Total" ? "Total" : mo["Name"].ToString(),
-                                     Utilization = (UInt64) mo["PercentProcessorTime"]
+                                     Utilization = (ulong) mo["PercentProcessorTime"]
                                  }));
             }
 
-            private static async Task<QueryResult<T>> Query<T>(string machineName, string query, Func<IEnumerable<ManagementObject>, IEnumerable<T>> conversion)
+            private static async Task<QueryResult<T>> QueryAsync<T>(string machineName, string query, Func<IEnumerable<ManagementObject>, IEnumerable<T>> conversion)
             {
                 var timer = Stopwatch.StartNew();
 
                 using (var q = Wmi.Query(machineName, query))
                 {
-                    var queryResults = (await q.Result).Cast<ManagementObject>();
+                    var queryResults = (await q.Result.ConfigureAwait(false)).Cast<ManagementObject>();
                     timer.Stop();
                     return new QueryResult<T>
                         {

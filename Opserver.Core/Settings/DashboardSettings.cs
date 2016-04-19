@@ -5,25 +5,17 @@ using System.Text.RegularExpressions;
 
 namespace StackExchange.Opserver
 {
-    public partial class DashboardSettings : Settings<DashboardSettings>, INodeSettings
+    public class DashboardSettings : Settings<DashboardSettings>, INodeSettings
     {
         public override bool Enabled => Providers.Any();
 
-        public List<Category> Categories { get; set; }
-        
-        public ProvidersSettings Providers { get; set; }
+        public List<Category> Categories { get; set; } = new List<Category>();
 
-        public List<NodeSettings> PerNodeSettings { get; set; }
+        public ProvidersSettings Providers { get; set; } = new ProvidersSettings();
 
-        public bool ShowOther { get; set; }
+        public List<NodeSettings> PerNodeSettings { get; set; } = new List<NodeSettings>();
 
-        public DashboardSettings()
-        {
-            Categories = new List<Category>();
-            Providers = new ProvidersSettings();
-            PerNodeSettings = new List<NodeSettings>();
-            ShowOther = true;
-        }
+        public bool ShowOther { get; set; } = true;
 
         public NodeSettings GetNodeSettings(string node, Category c)
         {
@@ -86,7 +78,7 @@ namespace StackExchange.Opserver
         /// <summary>
         /// Category that a server belongs to
         /// </summary>
-        public class Category : INodeSettings, ISettingsCollectionItem<Category>
+        public class Category : INodeSettings, ISettingsCollectionItem
         {
             /// <summary>
             /// The name that appears for this category
@@ -152,7 +144,7 @@ namespace StackExchange.Opserver
         /// <summary>
         /// Addtional per-node settings
         /// </summary>
-        public class NodeSettings : INodeSettings, ISettingsCollectionItem<NodeSettings>
+        public class NodeSettings : INodeSettings, ISettingsCollectionItem
         {
             string ISettingsCollectionItem.Name => Pattern;
 

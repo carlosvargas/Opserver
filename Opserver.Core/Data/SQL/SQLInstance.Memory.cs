@@ -6,9 +6,9 @@ namespace StackExchange.Opserver.Data.SQL
     public partial class SQLInstance
     {
         private Cache<List<SQLMemoryClerkSummaryInfo>> _memoryClerkSummary;
-        public Cache<List<SQLMemoryClerkSummaryInfo>> MemoryClerkSummary => _memoryClerkSummary ?? (_memoryClerkSummary = SqlCacheList<SQLMemoryClerkSummaryInfo>(30));
+        public Cache<List<SQLMemoryClerkSummaryInfo>> MemoryClerkSummary => _memoryClerkSummary ?? (_memoryClerkSummary = SqlCacheList<SQLMemoryClerkSummaryInfo>(RefreshInterval));
 
-        public class SQLMemoryClerkSummaryInfo : ISQLVersionedObject
+        public class SQLMemoryClerkSummaryInfo : ISQLVersioned
         {
             public Version MinVersion => SQLServerVersions.SQL2005.RTM;
 
@@ -119,7 +119,7 @@ namespace StackExchange.Opserver.Data.SQL
             public string GetFetchSQL(Version version)
             {
                 if (version < SQLServerVersions.SQL2012.RTM)
-                    return FetchSQL.Replace("pages_kb", "single_pages_kb + multi_pages_kb");
+                    return FetchSQL.Replace("pages_kb", "(single_pages_kb + multi_pages_kb)");
 
                 return FetchSQL;
             }

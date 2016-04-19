@@ -36,12 +36,12 @@ namespace StackExchange.Opserver.Data.Redis
 
         private static string GetMemoryAnalysisKey(RedisConnectionInfo connectionInfo, int database)
         {
-            return $"redis-memory-analysis-{connectionInfo.Host}:{connectionInfo.Port}:{database}";
+            return $"redis-memory-analysis-{connectionInfo.Host}:{connectionInfo.Port.ToString()}:{database.ToString()}";
         }
 
         public static RedisMemoryAnalysis AnalyzeDatabaseMemory(RedisConnectionInfo connectionInfo, int database)
         {
-            using (MiniProfiler.Current.Step("Redis Memory Analysis for " + connectionInfo + " - DB:" + database))
+            using (MiniProfiler.Current.Step("Redis Memory Analysis for " + connectionInfo + " - DB:" + database.ToString()))
             {
                 return Current.LocalCache.GetSet<RedisMemoryAnalysis>(GetMemoryAnalysisKey(connectionInfo, database), (old, ctx) => GetDatabaseMemoryAnalysis(connectionInfo, database), 24 * 60 * 60, 24 * 60 * 60);
             }
@@ -231,8 +231,8 @@ namespace StackExchange.Opserver.Data.Redis
 
         private KeyMatcher GetKeyMatcher(string key)
         {
-            for (int i = 0; i < KeyMatchers.Count; i++)
-                if (KeyMatchers[i].Regex.IsMatch(key)) return KeyMatchers[i];
+            foreach (var t in KeyMatchers)
+                if (t.Regex.IsMatch(key)) return t;
             return null;
         }
 
@@ -279,6 +279,12 @@ namespace StackExchange.Opserver.Data.Redis
             Interlocked.Add(ref _valueByteSize, valueSize);
 
             lock (_lock) TopKeys.Add(valueSize, key);
+
+            // Capacity cap to prevent a memory leak, but only every so often because Array.Copy isn't cheap.
+            if (TopKeys.Count > 10000)
+            {
+                lock (_lock) TopKeys.Capacity = 50;
+            }
         }
 
         class DescLongCompare : IComparer<long>

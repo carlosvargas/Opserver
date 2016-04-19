@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -61,7 +62,6 @@ namespace StackExchange.Opserver.Data.Redis
                 }
                 if (currentSection == null)
                 {
-                    //TODO: Take care of global pre-2.6 case here
                     continue;
                 }
 
@@ -94,7 +94,7 @@ namespace StackExchange.Opserver.Data.Redis
                     }
                     else
                     {
-                        prop.SetValue(currentSection, Convert.ChangeType(value, prop.PropertyType));
+                        prop.SetValue(currentSection, Convert.ChangeType(value, prop.PropertyType, CultureInfo.InvariantCulture));
                     }
                 }
                 catch (Exception e)
@@ -166,7 +166,7 @@ namespace StackExchange.Opserver.Data.Redis
                         if (long.TryParse(value, out l))
                         {
                             var ts = TimeSpan.FromSeconds(l);
-                            return $"{value} ({(int) ts.TotalDays}d {ts.Hours}h {ts.Minutes}m {ts.Seconds}s)";
+                            return $"{value} ({(int) ts.TotalDays}d {ts.Hours.ToString()}h {ts.Minutes.ToString()}m {ts.Seconds.ToString()}s)";
                         }
                         break;
                     case "last_save_time":
@@ -179,19 +179,19 @@ namespace StackExchange.Opserver.Data.Redis
                     case "master_sync_left_bytes":
                         if (long.TryParse(value, out l))
                         {
-                            return $"{l:n0} bytes";
+                            return l.ToString("n0") + " bytes";
                         }
                         break;
                     case "used_memory_rss":
                         if (long.TryParse(value, out l))
                         {
-                            return $"{l} ({l.ToSize(precision: 1)})";
+                            return $"{l.ToString()} ({l.ToSize(precision: 1)})";
                         }
                         break;
                     default:
                         if (!_dontFormatList.Any(label.Contains) && long.TryParse(value, out l))
                         {
-                            return $"{l:n0}";
+                            return l.ToString("n0");
                         }
                         break;
                 }

@@ -21,7 +21,9 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
     {
         public abstract bool HasData { get; }
         public string Name { get; protected set; }
-        
+
+        public override string ToString() => GetType().Name;
+
         protected DashboardDataProvider(string uniqueKey) : base(uniqueKey) { }
 
         protected DashboardDataProvider(IProviderSettings settings) : base(settings.Name + "Dashboard")
@@ -58,17 +60,17 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
         
         public virtual IEnumerable<Node> GetNodesByIP(IPAddress ip)
         {
-            return AllNodes.Where(n => n.IPs?.Contains(ip) == true);
+            return AllNodes.Where(n => n.IPs?.Any(i => i.Contains(ip)) == true);
         }
 
         public virtual string GetManagementUrl(Node node) { return null; }
-        public abstract Task<List<GraphPoint>> GetCPUUtilization(Node node, DateTime? start, DateTime? end, int? pointCount = null);
-        public abstract Task<List<GraphPoint>> GetMemoryUtilization(Node node, DateTime? start, DateTime? end, int? pointCount = null);
-        public abstract Task<List<DoubleGraphPoint>> GetNetworkUtilization(Node node, DateTime? start, DateTime? end, int? pointCount = null);
+        public abstract Task<List<GraphPoint>> GetCPUUtilizationAsync(Node node, DateTime? start, DateTime? end, int? pointCount = null);
+        public abstract Task<List<GraphPoint>> GetMemoryUtilizationAsync(Node node, DateTime? start, DateTime? end, int? pointCount = null);
+        public abstract Task<List<DoubleGraphPoint>> GetNetworkUtilizationAsync(Node node, DateTime? start, DateTime? end, int? pointCount = null);
 
-        public abstract Task<List<DoubleGraphPoint>> GetUtilization(Interface iface, DateTime? start, DateTime? end, int? pointCount = null);
+        public abstract Task<List<DoubleGraphPoint>> GetUtilizationAsync(Interface iface, DateTime? start, DateTime? end, int? pointCount = null);
         
-        public abstract Task<List<GraphPoint>> GetUtilization(Volume volume, DateTime? start, DateTime? end, int? pointCount = null);
+        public abstract Task<List<GraphPoint>> GetUtilizationAsync(Volume volume, DateTime? start, DateTime? end, int? pointCount = null);
         
         public Application GetApplication(string id) => AllNodes.SelectMany(n => n.Apps.Where(a => a.Id == id)).FirstOrDefault();
 
@@ -86,16 +88,18 @@ namespace StackExchange.Opserver.Data.Dashboard.Providers
             [CallerLineNumber] int sourceLineNumber = 0)
             where T : class
         {
+            // ReSharper disable ExplicitCallerInfoArgument
             return new Cache<T>(memberName, sourceFilePath, sourceLineNumber)
-                {
-                    AffectsNodeStatus = affectsStatus,
-                    CacheForSeconds = cacheSeconds,
-                    CacheFailureForSeconds = cacheFailureSeconds,
-                    UpdateCache = UpdateFromProvider(typeof (T).Name + "-List", fetch)
-                };
+            {
+                AffectsNodeStatus = affectsStatus,
+                CacheForSeconds = cacheSeconds,
+                CacheFailureForSeconds = cacheFailureSeconds,
+                UpdateCache = UpdateFromProvider(typeof (T).Name + "-List", fetch)
+            };
+            // ReSharper restore ExplicitCallerInfoArgument
         }
 
-        public Action<Cache<T>> UpdateFromProvider<T>(string opName, Func<Task<T>> fetch) where T : class
+        public Func<Cache<T>, Task> UpdateFromProvider<T>(string opName, Func<Task<T>> fetch) where T : class
         {
             return UpdateCacheItem(description: "Data Provieder Fetch: " + NodeType + ":" + opName,
                                    getData: fetch,

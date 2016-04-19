@@ -16,8 +16,7 @@ namespace StackExchange.Opserver.Data.CloudFlare
                 return _zones ?? (_zones = new Cache<List<CloudFlareZone>>
                 {
                     CacheForSeconds = 5*60,
-                    CacheStaleForSeconds = 60*60,
-                    UpdateCache = CloudFlareFetch("Fetch Zones", api => api.Get<List<CloudFlareZone>>("zones"))
+                    UpdateCache = CloudFlareFetch(nameof(Zones), api => api.Get<List<CloudFlareZone>>("zones"))
                 });
             }
         }
@@ -35,16 +34,16 @@ namespace StackExchange.Opserver.Data.CloudFlare
                 return _dnsRecords ?? (_dnsRecords = new Cache<List<CloudFlareDNSRecord>>
                 {
                     CacheForSeconds = 5*60,
-                    CacheStaleForSeconds = 60*60,
-                    UpdateCache = CloudFlareFetch("Fetch DNSRecords",
+                    UpdateCache = CloudFlareFetch(nameof(DNSRecords),
                         async api =>
                         {
                             var records = new List<CloudFlareDNSRecord>();
-                            var data = Zones.Data; // Intentionally cause a load here, since by nature of caches we have a race
+                            await Zones.PollAsync(); // wait on zones to load first...
+                            var data = Zones.Data;
                             if (data == null) return records;
                             foreach (var z in data)
                             {
-                                var zoneRecords = await api.Get<List<CloudFlareDNSRecord>>($"zones/{z.Id}/dns_records", _dnsRecordFetchParams);
+                                var zoneRecords = await api.Get<List<CloudFlareDNSRecord>>($"zones/{z.Id}/dns_records", _dnsRecordFetchParams).ConfigureAwait(false);
                                 records.AddRange(zoneRecords);
                             }
                             return records;
@@ -53,10 +52,7 @@ namespace StackExchange.Opserver.Data.CloudFlare
             }
         }
 
-        public CloudFlareZone GetZoneFromHost(string host)
-        {
-            return Zones.SafeData(true).FirstOrDefault(z => host.EndsWith(z.Name));
-        }
+        public CloudFlareZone GetZoneFromHost(string host) => Zones.Data?.FirstOrDefault(z => host.EndsWith(z.Name));
 
         public CloudFlareZone GetZoneFromUrl(string url)
         {

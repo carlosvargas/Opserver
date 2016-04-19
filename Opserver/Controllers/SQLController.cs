@@ -14,14 +14,17 @@ namespace StackExchange.Opserver.Controllers
     [OnlyAllow(Roles.SQL)]
     public partial class SQLController : StatusController
     {
-        protected override ISecurableSection SettingsSection => Current.Settings.SQL;
+        public override ISecurableSection SettingsSection => Current.Settings.SQL;
 
-        protected override string TopTab => TopTabs.BuiltIn.SQL;
+        public override TopTab TopTab => new TopTab("SQL", nameof(Servers), this, 10)
+        {
+            GetMonitorStatus = () => SQLInstance.AllInstances.GetWorstStatus()
+        };
 
         [Route("sql")]
         public ActionResult Dashboard()
         {
-            return Redirect("/sql/servers");
+            return RedirectToAction(nameof(Servers));
         }
 
         [Route("sql/servers")]
@@ -86,19 +89,10 @@ namespace StackExchange.Opserver.Controllers
 
         [OutputCache(Duration = 5 * 1, VaryByParam = "node;sort;options", VaryByContentEncoding = "gzip;deflate")]
         [Route("sql/top")]
-        public ActionResult Top(string node, SQLInstance.TopSearchOptions options, bool? detailed = false)
+        public ActionResult Top(string node, SQLInstance.TopSearchOptions options)
         {
-            var i = SQLInstance.Get(node);
-            options.SetDefaults();
-
-
-            var vd = new OperationsTopModel
-            {
-                View = SQLViews.Top,
-                Detailed = detailed.GetValueOrDefault(),
-                CurrentInstance = i,
-                TopSearchOptions = options
-            };
+            var vd = GetOperationsModel(node, options);
+            var i = vd.CurrentInstance;
 
             if (i != null)
             {
@@ -108,6 +102,26 @@ namespace StackExchange.Opserver.Controllers
             }
 
             return View("Operations.Top", vd);
+        }
+
+        [Route("sql/top/filters")]
+        public ActionResult TopFilters(string node, SQLInstance.TopSearchOptions options)
+        {
+            var vd = GetOperationsModel(node, options);
+            return View("Operations.Top.Filters", vd);
+        }
+
+        private OperationsTopModel GetOperationsModel(string node, SQLInstance.TopSearchOptions options)
+        {
+            var i = SQLInstance.Get(node);
+            options.SetDefaults();
+
+            return new OperationsTopModel
+            {
+                View = SQLViews.Top,
+                CurrentInstance = i,
+                TopSearchOptions = options
+            };
         }
 
         [Route("sql/top/detail")]
@@ -135,28 +149,32 @@ namespace StackExchange.Opserver.Controllers
 
             var ms = new MemoryStream(Encoding.UTF8.GetBytes(op.Data.QueryPlan));
 
-            return File(ms, "text/xml", $"QueryPlan-{Math.Abs(handle.GetHashCode())}.sqlplan");
+            return File(ms, "text/xml", $"QueryPlan-{Math.Abs(handle.GetHashCode()).ToString()}.sqlplan");
         }
 
         [Route("sql/active")]
-        public ActionResult Active(string node, SQLInstance.ActiveSearchOptions options,
-                                   SQLInstance.ActiveSearchOptions.ShowSleepingSessionOptions? sleeping = null,
-                                   bool? system = false,
-                                   bool? details = false)
+        public ActionResult Active(string node, SQLInstance.ActiveSearchOptions options)
         {
-            if (sleeping.HasValue) options.IncludeSleepingSessions = sleeping.Value;
-            if (system.HasValue) options.IncludeSystemSessions = system.Value;
-            if (details.HasValue) options.GetAdditionalInfo = details.Value;
+            var vd = GetOperationsActiveModel(node, options);
+            return View("Operations.Active", vd);
+        }
 
+        [Route("sql/active/filters")]
+        public ActionResult ActiveFilters(string node, SQLInstance.ActiveSearchOptions options)
+        {
+            var vd = GetOperationsActiveModel(node, options);
+            return View("Operations.Active.Filters", vd);
+        }
+
+        private OperationsActiveModel GetOperationsActiveModel(string node, SQLInstance.ActiveSearchOptions options)
+        {
             var i = SQLInstance.Get(node);
-
-            var vd = new OperationsActiveModel
+            return new OperationsActiveModel
             {
                 View = SQLViews.Active,
                 CurrentInstance = i,
                 ActiveSearchOptions = options
             };
-            return View("Operations.Active", vd);
         }
 
         [Route("sql/connections")]
@@ -200,12 +218,27 @@ namespace StackExchange.Opserver.Controllers
             };
             switch (view)
             {
+                case "backups":
+                    vd.View = DatabasesModel.Views.Backups;
+                    return View("Databases.Modal.Backups", vd);
+                case "restores":
+                    vd.View = DatabasesModel.Views.Restores;
+                    return View("Databases.Modal.Restores", vd);
+                case "storage":
+                    vd.View = DatabasesModel.Views.Storage;
+                    return View("Databases.Modal.Storage", vd);
                 case "tables":
                     vd.View = DatabasesModel.Views.Tables;
                     return View("Databases.Modal.Tables", vd);
                 case "views":
                     vd.View = DatabasesModel.Views.Views;
                     return View("Databases.Modal.Views", vd);
+                case "missingindexes":
+                    vd.View = DatabasesModel.Views.MissingIndexes;
+                    return View("Databases.Modal.MissingIndexes", vd);
+                case "storedprocedures":
+                    vd.View = DatabasesModel.Views.StoredProcedures;
+                    return View("Databases.Modal.StoredProcedures", vd);
             }
             return View("Databases.Modal.Tables", vd);
         }

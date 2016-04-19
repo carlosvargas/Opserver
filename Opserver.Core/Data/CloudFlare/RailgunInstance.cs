@@ -6,18 +6,18 @@ namespace StackExchange.Opserver.Data.CloudFlare
 {
     public partial class RailgunInstance : PollNode, IEquatable<RailgunInstance>, ISearchableNode
     {
-        string ISearchableNode.DisplayName { get { return Host + ":" + Port + " - " + Name; } }
-        string ISearchableNode.Name { get { return Host + ":" + Port; } }
-        string ISearchableNode.CategoryName { get { return "CloudFlare"; } }
+        string ISearchableNode.DisplayName => Host + ":" + Port.ToString() + " - " + Name;
+        string ISearchableNode.Name => Host + ":" + Port.ToString();
+        string ISearchableNode.CategoryName => "CloudFlare";
 
         public CloudFlareSettings.Railgun Settings { get; internal set; }
-        public string Name { get { return Settings.Name; } }
-        public string Host { get { return Settings.Host; } }
-        public int Port { get { return Settings.Port; } }
+        public string Name => Settings.Name;
+        public string Host => Settings.Host;
+        public int Port => Settings.Port;
 
-        public override string NodeType { get { return "Railgun"; } }
-        public override int MinSecondsBetweenPolls { get { return 5; } }
-        
+        public override string NodeType => "Railgun";
+        public override int MinSecondsBetweenPolls => 5;
+
         public override IEnumerable<Cache> DataPollers
         {
             get { yield return Stats; }
@@ -26,12 +26,12 @@ namespace StackExchange.Opserver.Data.CloudFlare
         protected override IEnumerable<MonitorStatus> GetMonitorStatus() { yield break; }
         protected override string GetMonitorStatusReason() { return ""; }
 
-        public RailgunInstance(CloudFlareSettings.Railgun settings) : base(settings.Host + ":" + settings.Port)
+        public RailgunInstance(CloudFlareSettings.Railgun settings) : base(settings.Host + ":" + settings.Port.ToString())
         {
             Settings = settings;
         }
 
-        public Action<Cache<T>> GetFromRailgun<T>(string opName, Func<RailgunInstance, Task<T>> getFromConnection) where T : class
+        public Func<Cache<T>, Task> GetFromRailgun<T>(string opName, Func<RailgunInstance, Task<T>> getFromConnection) where T : class
         {
             return UpdateCacheItem(description: "CloudFlare - Railgun Fetch: " + Name + ":" + opName,
                 getData: () => getFromConnection(this),
@@ -47,9 +47,6 @@ namespace StackExchange.Opserver.Data.CloudFlare
             return Host == other.Host && Port == other.Port;
         }
 
-        public override string ToString()
-        {
-            return string.Concat(Host, ": ", Port);
-        }
+        public override string ToString() => Host + ":" + Port.ToString();
     }
 }

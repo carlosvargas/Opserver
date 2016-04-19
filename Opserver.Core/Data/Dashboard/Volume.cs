@@ -25,6 +25,7 @@ namespace StackExchange.Opserver.Data.Dashboard
         public double? Used { get; internal set; }
         public double? Available { get; internal set; }
         public float? PercentUsed { get; internal set; }
+        public float? PercentFree => 100 - PercentUsed;
 
         public MonitorStatus MonitorStatus => Status.ToMonitorStatus();
         // TODO: Implement
@@ -51,15 +52,15 @@ namespace StackExchange.Opserver.Data.Dashboard
         public string PrettyUsed => _sizeFormat(Used);
         public string PrettyAvailable => _sizeFormat(Available);
 
-        public string SpaceStatusClass
+        public MonitorStatus SpaceStatus
         {
             get
             {
                 if (PercentUsed > CriticalPercentUsed)
-                    return MonitorStatus.Critical.GetDescription();
+                    return MonitorStatus.Critical;
                 if (PercentUsed > WarningPercentUsed)
-                    return MonitorStatus.Warning.GetDescription();
-                return MonitorStatus.Good.GetDescription();
+                    return MonitorStatus.Warning;
+                return MonitorStatus.Good;
             }
         }
     }
