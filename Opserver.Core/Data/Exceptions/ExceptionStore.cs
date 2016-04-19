@@ -57,13 +57,11 @@ namespace StackExchange.Opserver.Data.Exceptions
                             async () =>
                             {
                                 var result = (await QueryListAsync<Application>($"Applications Fetch: {Name}", @"
-Select ApplicationName as Name, 
-       Sum(DuplicateCount) as ExceptionCount,
-	   Sum(Case When CreationDate > DateAdd(Second, -@RecentSeconds, GETUTCDATE()) Then DuplicateCount Else 0 End) as RecentExceptionCount,
-	   MAX(CreationDate) as MostRecent
-  From Exceptions
- Where DeletionDate Is Null
- Group By ApplicationName", new {Current.Settings.Exceptions.RecentSeconds}));
+Select 'API' as Name, 
+       COUNT(ID) as ExceptionCount,
+	   0 AS RecentExceotionCount,
+	   MAX(Date) as MostRecent
+  From APIErrors", new {Current.Settings.Exceptions.RecentSeconds}));
                                 result.ForEach(a => { a.StoreName = Name; a.Store = this; });
                                 return result;
                          })
@@ -81,13 +79,9 @@ Select ApplicationName as Name,
                     CacheForSeconds = Settings.PollIntervalSeconds,
                     UpdateCache = UpdateFromSql("Error-Summary-List",
                         () => QueryListAsync<Error>($"ErrorSummary Fetch: {Name}", @"
-Select e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e.IsProtected, e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Source, e.Message, e.StatusCode, e.ErrorHash, e.DuplicateCount
-  From (Select Id, Rank() Over (Partition By ApplicationName Order By CreationDate desc) as r
-		From Exceptions
-		Where DeletionDate Is Null) er
-	   Inner Join Exceptions e On er.Id = e.Id
- Where er.r <= @PerAppSummaryCount
- Order By CreationDate Desc", new { PerAppSummaryCount }))
+Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+  From APIErrors as e
+ Order By Date Desc", new { PerAppSummaryCount }))
                 });
             }
         }
@@ -120,41 +114,36 @@ Select e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e
         public Task<List<Error>> GetAllErrors(int maxPerApp, string appName = null)
         {
             return QueryListAsync<Error>($"GetAllErrors() for {Name} App: {(appName ?? "All")}", @"
-Select e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e.IsProtected, e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Source, e.Message, e.StatusCode, e.ErrorHash, e.DuplicateCount
-  From (Select Id, Rank() Over (Partition By ApplicationName Order By CreationDate desc) as r
-		From Exceptions
-		Where DeletionDate Is Null" + (appName.HasValue() ? " And ApplicationName = @appName" : "") + @") er
-	   Inner Join Exceptions e On er.Id = e.Id
- Where er.r <= @maxPerApp
- Order By CreationDate Desc", new {maxPerApp, appName});
+Select TOP (@maxPerApp) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+  From APIErrors as e
+ Order By Date Desc", new {maxPerApp, appName});
         }
 
         public Task<List<Error>> GetSimilarErrors(Error error, int max)
         {
             return QueryListAsync<Error>($"GetSimilarErrors() for {Name}", @"
-    Select Top (@max) e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e.IsProtected, e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Source, e.Message, e.Detail, e.StatusCode, e.ErrorHash, e.DuplicateCount, e.DeletionDate
-      From Exceptions e
-     Where ApplicationName = @ApplicationName
-       And Message = @Message
-     Order By CreationDate Desc", new {max, error.ApplicationName, error.Message});
+	Select TOP (@max) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+	  From APIErrors as e
+     WHERE Message = @Message
+     Order By Date Desc", new {max, error.ApplicationName, error.Message});
         }
 
         public Task<List<Error>> GetSimilarErrorsInTime(Error error, int max)
         {
             return QueryListAsync<Error>($"GetSimilarErrorsInTime() for {Name}", @"
-    Select Top (@max) e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e.IsProtected, e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Source, e.Message, e.Detail, e.StatusCode, e.ErrorHash, e.DuplicateCount, e.DeletionDate
-      From Exceptions e
-     Where CreationDate Between @start and @end
-     Order By CreationDate Desc", new { max, start = error.CreationDate.AddMinutes(-5), end = error.CreationDate.AddMinutes(5) });
+	Select TOP (@max) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+	  From APIErrors as e
+     Where Date Between @start and @end
+     Order By Date Desc", new { max, start = error.CreationDate.AddMinutes(-5), end = error.CreationDate.AddMinutes(5) });
         }
 
         public Task<List<Error>> FindErrors(string searchText, string appName, int max, bool includeDeleted)
         {
             return QueryListAsync<Error>($"FindErrors() for {Name}", @"
-    Select Top (@max) e.Id, e.GUID, e.ApplicationName, e.MachineName, e.CreationDate, e.Type, e.IsProtected, e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Source, e.Message, e.Detail, e.StatusCode, e.ErrorHash, e.DuplicateCount, e.DeletionDate
-      From Exceptions e
-     Where (Message Like @search Or Detail Like @search Or Url Like @search)" + (appName.HasValue() ? " And ApplicationName = @appName" : "") + (includeDeleted ? "" : " And DeletionDate Is Null") + @"
-     Order By CreationDate Desc", new { search = '%' + searchText + '%', appName, max });
+	Select TOP (@max) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+	  From APIErrors as e
+     Where (Message Like @search Or request Like @search Or Url Like @search)
+     Order By Date Desc", new { search = '%' + searchText + '%', appName, max });
         }
 
         public Task<int> DeleteAllErrors(string appName)
@@ -198,15 +187,15 @@ Update Exceptions
                 using (var c = await GetConnectionAsync())
                 {
                     sqlError = (await c.QueryAsync<Error>(@"
-    Select Top 1 * 
-      From Exceptions 
+    Select Top 1 e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request AS FullJson, e.Message, e.StatusCode, '', 0 AS DuplicationCount, e.Exception as Detail
+      From ApiErrors e
      Where GUID = @guid", new { guid }, commandTimeout: QueryTimeout)).FirstOrDefault();
                 }
                 if (sqlError == null) return null;
 
                 // everything is in the JSON, but not the columns and we have to deserialize for collections anyway
                 // so use that deserialized version and just get the properties that might change on the SQL side and apply them
-                var result = Error.FromJson(sqlError.FullJson);
+                var result = sqlError;
                 result.DuplicateCount = sqlError.DuplicateCount;
                 result.DeletionDate = sqlError.DeletionDate;
                 result.ApplicationName = sqlError.ApplicationName;

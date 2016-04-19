@@ -59,11 +59,20 @@
             </div>
         </td>
         <td class="text-cell" title="@e.Url">
-            <div class="overflow-cap-150">@e.Url.TruncateWithEllipsis(40)</div>
+            <div class="overflow-cap-200">@e.Url.TruncateWithEllipsis(40)</div>
         </td>
-        <td>@e.IPAddress</td>
+        <td>@e.HTTPMethod</td>
+        <td>@e.StatusCode</td>
         <td>@e.Host</td>
-        <td style="@errorStyle">@e.MachineName.ToLower()</td>
+        @if (!string.IsNullOrEmpty(@e.MachineName))
+        {
+	        <td style="@errorStyle">@e.MachineName.ToLower()</td>
+        }
+        else
+        {
+	        <td style="@errorStyle"></td>
+        }
         <td style="@errorStyle" data-count="@e.DuplicateCount">@Html.Raw(e.DuplicateCount > 1 ? "(" + (e.DuplicateCount) + "&times;)" : "")</td>
+        <td>@e.IPAddress</td>
     </tr>
 }   

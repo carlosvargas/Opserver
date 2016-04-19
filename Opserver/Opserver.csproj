@@ -247,7 +247,13 @@
     </Content>
     <Content Include="Config\JiraSettings.json.example" />
     <None Include="compilerconfig.json" />
+    <None Include="Config\ExceptionsSettings.json" />
     <None Include="Config\PagerDutySettings.json.example" />
+    <None Include="Config\RedisSettings.json" />
+    <None Include="Config\SecuritySettings.config">
+      <SubType>Designer</SubType>
+    </None>
+    <None Include="Config\TeamCitySettings.json" />
     <None Include="Content\_Styles.HeadsUp.less">
       <DependentUpon>Styles.less</DependentUpon>
     </None>

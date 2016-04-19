@@ -42,10 +42,12 @@
                 <th>@(Model.ShowAll ? HeaderLink("App", ExceptionSorts.AppAsc) : HeaderLink("Type", ExceptionSorts.TypeAsc))</th>
                 <th>@HeaderLink("Error", ExceptionSorts.MessageAsc)</th>
                 <th>@HeaderLink("Url", ExceptionSorts.UrlAsc)</th>
-                <th>@HeaderLink("Remote IP", ExceptionSorts.IPAddressAsc)</th>
+                <th>@HeaderLink("Method", ExceptionSorts.UrlAsc)</th>
+                <th>@HeaderLink("Status", ExceptionSorts.UrlAsc)</th>
                 <th>@HeaderLink("Host", ExceptionSorts.HostAsc)</th>
                 <th>@HeaderLink("Server", ExceptionSorts.MachineNameAsc)</th>
                 <th>@HeaderLink("Count", ExceptionSorts.CountDesc)</th>
+                <th>@HeaderLink("Remote IP", ExceptionSorts.IPAddressAsc)</th>
             </tr>
         </thead>
         <tbody>

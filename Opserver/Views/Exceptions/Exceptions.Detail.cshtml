@@ -12,9 +12,11 @@
     @if (error != null)
     {
         <script>
-            var Exception = @error.ToDetailedJson().AsHtml();
+            var Exception = @error.FullJson.AsHtml();
             $(function () {
-                Status.Exceptions.init({ log: '@error.ApplicationName', id: '@error.GUID' });
+            	Status.Exceptions.init({ log: '@error.ApplicationName', id: '@error.GUID' });
+	            Exception.Body = JSON.parse(Exception.Body);
+	            $(".error-request-detail").html(JSON.stringify(Exception, undefined, 2));
             });
         </script>
     }
@@ -153,6 +155,8 @@
         <div class="error-info">
             <div class="error-type">@error.Type</div>
             <pre class="error-detail">@error.Detail
+        </pre>
+            <pre class="error-detail error-request-detail">@error.FullJson
         </pre>
             <p class="error-time">occurred <b title="@error.CreationDate.ToLongDateString() at @error.CreationDate.ToLongTimeString()">@error.CreationDate.ToRelativeTime()</b> (@error.CreationDate.ToZuluTime()) on @error.MachineName@if (!error.DeletionDate.HasValue && Current.User.IsExceptionAdmin)
             {<text> <span class="info-delete-link">(<a class="info-link" href="#" title="delete this error from the log">delete</a>)</span></text>}</p>
