@@ -1,7 +1,8 @@
 ﻿window.Status = (function() {
 
     var loadersList = {},
-        registeredRefreshes = {};
+        registeredRefreshes = {},
+        refreshInteralMultiplier = 1;
 
     function registerRefresh(name, callback, interval, paused) {
         var refreshData = {
@@ -11,7 +12,13 @@
             paused: paused // false on init almost always
         };
         registeredRefreshes[name] = refreshData;
-        refreshData.timer = setTimeout(function() { execRefresh(refreshData); }, refreshData.interval);
+        refreshData.timer = setTimeout(function() { execRefresh(refreshData); }, refreshData.interval * refreshInteralMultiplier);
+    }
+
+    function setRefreshInterval(val) {
+        if (val === 0) return; // don't do that
+        console.log('Setting refresh speed to ' + (100/val).toFixed(0) + '% of normal.');
+        refreshInteralMultiplier = val;
     }
 
     function getRefresh(name) {
@@ -19,8 +26,9 @@
     }
 
     function runRefresh(name) {
-        pauseRefresh(name);
-        resumeRefresh(name);
+        console.log('Forcing a full refresh.');
+        pauseRefresh(name, true);
+        resumeRefresh(name, true);
     }
 
     function scheduleRefresh(ms) {
@@ -34,7 +42,7 @@
         var def = refreshData.func();
         if (typeof (def.done) === 'function') {
             def.done(function() {
-                refreshData.timer = setTimeout(function() { execRefresh(refreshData); }, refreshData.interval);
+                refreshData.timer = setTimeout(function() { execRefresh(refreshData); }, refreshData.interval * refreshInteralMultiplier);
             });
         }
 
@@ -42,8 +50,7 @@
         refreshData.timer = 0;
     }
 
-    function pauseRefresh(name) {
-
+    function pauseRefresh(name, silent) {
         function pauseSingleRefresh(r) {
             r.paused = true;
             if (r.timer) {
@@ -61,12 +68,16 @@
         }
 
         if (name && registeredRefreshes[name]) {
-            console.log('Refresh paused for: ' + name);
+            if (!silent) {
+                console.log('Refresh paused for: ' + name);
+            }
             pauseSingleRefresh(registeredRefreshes[name]);
             return;
         }
 
-        console.log('Refresh paused');
+        if (!silent) {
+            console.log('Refresh paused');
+        }
         for (var key in registeredRefreshes) {
             if (registeredRefreshes.hasOwnProperty(key)) {
                 pauseSingleRefresh(registeredRefreshes[key]);
@@ -74,8 +85,7 @@
         }
     }
 
-    function resumeRefresh(name) {
-
+    function resumeRefresh(name, silent) {
         function resumeSingleRefresh(r) {
             if (r.timer) {
                 clearTimeout(r.timer);
@@ -85,12 +95,16 @@
         }
 
         if (name && registeredRefreshes[name]) {
-            console.log('Refresh resumed for: ' + name);
+            if (!silent) {
+                console.log('Refresh resumed for: ' + name);
+            }
             resumeSingleRefresh(registeredRefreshes[name]);
             return;
         }
 
-        console.log('Refresh resumed');
+        if (!silent) {
+            console.log('Refresh resumed');
+        }
         for (var key in registeredRefreshes) {
             if (registeredRefreshes.hasOwnProperty(key)) {
                 resumeSingleRefresh(registeredRefreshes[key]);
@@ -357,10 +371,11 @@
                 $('.action-popup').remove();
             },
             'show': function() {
-                resumeRefresh();
+                setRefreshInterval(1);
+                runRefresh();
             },
             'hide': function() {
-                pauseRefresh();
+                setRefreshInterval(10);
             }
         });
         prepTableSorter();
@@ -753,12 +768,15 @@ Status.SQL = (function () {
                 var obj = val.indexOf('tables/') > 0 || val.indexOf('views/') || val.indexOf('storedprocedures/') > 0
                           ? val.split('/').pop() : null;
                 function showColumns() {
-                    $('.js-database-table,.js-database-view,.js-database-storedproc').removeClass('info').next().hide();
-                    $('[data-table="' + obj + '"],[data-view="' + obj + '"],[data-storedproc="' + obj + '"]').addClass('info').next().show(200);
+                    $('.js-next-collapsible').removeClass('info').next().hide();
+                    var cell = $('[data-obj="' + obj + '"]').addClass('info').next().show(200).find('td');
+                    if (cell.length === 1) {
+                        cell.css('max-width', cell.closest('.js-database-modal-right').width());
+                    }
                 }
                 if (!firstLoad) {
+                    // TODO: Generalize this to not need the replace? Possibly a root load in the modal
                     if ((/\/tables/.test(val) && /\/tables/.test(prev)) || (/\/views/.test(val) && /\/views/.test(prev)) || (/\/storedprocedures/.test(val) && /\/storedprocedures/.test(prev))) {
-
                         showColumns();
                         return;
                     }
@@ -829,7 +847,7 @@ Status.SQL = (function () {
             return false;
         }).on('click', '.ag-node', function() {
             window.location.hash = $('.ag-node-name a', this)[0].hash;
-        }).on('click', '.js-database-table,.js-database-view,.js-database-storedproc', function () {
+        }).on('click', '.js-next-collapsible', function () {
             window.location.hash = window.location.hash.replace(/\/tables\/.*/, '/tables').replace(/\/views\/.*/, '/views').replace(/\/storedprocedures\/.*/, '/storedprocedures');
         });
     }
@@ -1222,23 +1240,23 @@ Status.Exceptions = (function () {
             var previewTimer = 0;
             $('.js-content').on({
                 mouseenter: function (e) {
-                    if ($(e.target).closest('td:first-child').length) {
-                        return;
+                    if ($(e.target).closest('.js-error td:nth-child(4)').length) {
+                        var jThis = $(this).find('.js-exception-link'),
+                            url = jThis.attr('href').replace('/detail', '/preview');
+
+                        clearTimeout(previewTimer);
+                        previewTimer = setTimeout(function() {
+                                $.get(url,
+                                    function(resp) {
+                                        var sane = $(resp).filter('.error-preview');
+                                        if (!sane.length) return;
+
+                                        $('.error-preview-popup').fadeOut(125, function() { $(this).remove(); });
+                                        var errDiv = $('<div class="error-preview-popup" />').append(resp);
+                                        errDiv.appendTo(jThis.parent()).fadeIn('fast');
+                                    });
+                            }, 600);
                     }
-                    var jThis = $(this).find('.js-exception-link'),
-                        url = jThis.attr('href').replace('/detail', '/preview');
-
-                    clearTimeout(previewTimer);
-                    previewTimer = setTimeout(function () {
-                        $.get(url, function (resp) {
-                            var sane = $(resp).filter('.error-preview');
-                            if (!sane.length) return;
-
-                            $('.error-preview-popup').fadeOut(125, function () { $(this).remove(); });
-                            var errDiv = $('<div class="error-preview-popup" />').append(resp);
-                            errDiv.appendTo(jThis.parent()).fadeIn('fast');
-                        });
-                    }, 600);
                 },
                 mouseleave: function () {
                     clearTimeout(previewTimer);
@@ -1650,14 +1668,25 @@ Status.HAProxy = (function () {
                 height = options.height - margin.top - margin.bottom;
                 height2 = options.height - margin2.top - margin2.bottom;
 
+                var timeFormats = d3.time.format.utc.multi([
+                    ['.%L', function (d) { return d.getUTCMilliseconds(); }],
+                    [':%S', function (d) { return d.getUTCSeconds(); }],
+                    ['%H:%M', function (d) { return d.getUTCMinutes(); }],
+                    ['%H:%M', function (d) { return d.getUTCHours(); }],
+                    ['%a %d', function (d) { return d.getUTCDay() && d.getUTCDate() !== 1; }],
+                    ['%b %d', function (d) { return d.getUTCDate() !== 1; }],
+                    ['%B', function (d) { return d.getUTCMonth(); }],
+                    ['%Y', function () { return true; }]
+                ]);
+
                 x = d3.time.scale.utc().range([0, width]);
                 x2 = d3.time.scale.utc().range([0, width]);
                 y = d3.scale.linear().range([height, 0]);
                 yr = d3.scale.linear().range([height, 0]);
                 y2 = d3.scale.linear().range([height2, 0]);
 
-                xAxis = d3.svg.axis().scale(x).orient('bottom');
-                xAxis2 = d3.svg.axis().scale(x2).orient('bottom');
+                xAxis = d3.svg.axis().scale(x).orient('bottom').tickFormat(timeFormats);
+                xAxis2 = d3.svg.axis().scale(x2).orient('bottom').tickFormat(timeFormats);
                 yAxis = d3.svg.axis().scale(y).orient('left');
                 yrAxis = d3.svg.axis().scale(yr).orient('right');
                 
@@ -2058,10 +2087,10 @@ Status.HAProxy = (function () {
                 brush2.extent(x.domain())(bottomBrushArea);
 
                 if (options.showBuilds && !data.builds) {
-                    $.getJSON(Status.options.rootPath + 'graph/builds/json', params, function (bData) {
-                        postProcess(bData);
-                        drawBuilds(bData);
-                    });
+                    //$.getJSON(Status.options.rootPath + 'graph/builds/json', params, function (bData) {
+                    //    postProcess(bData);
+                    //    drawBuilds(bData);
+                    //});
                 }
             }
 

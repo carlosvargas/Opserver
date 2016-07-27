@@ -13,11 +13,7 @@
     var s = Current.Settings;
     var cacheStats = ExtensionMethods.GetGetSetStatistics();
     var pollingInfo = PollingEngine.GetPollingStatus();
-}
-@section head {
-    <style>
-        dl { margin-bottom: 0; }
-    </style>
+    var currentTheme = Theme.Current;
 }
 @helper EnabledSpan(bool enabled) {
     <span class="@(enabled ? "text-success" : "text-danger")">@(enabled ? "Enabled" : "Disabled")</span>
@@ -56,6 +52,27 @@
             </div>
         </div>
         <div class="panel panel-default">
+            <div class="panel-heading">Settings</div>
+            <div class="panel-body small">
+                <div class="value-block col-xs-4">
+                    <form method="POST" action="~/set-theme" class="form-group-sm">
+                        <select class="js-theme form-control" name="theme">
+                            @foreach (var t in Theme.Options)
+                            {
+                                <option value="@t" selected="@(t == currentTheme ? "selected" : null)">@t@(t == Theme.Default ? " (Default)" : null)</option>
+                            }
+                        </select>
+                    </form>
+                    <label>Current Theme</label>
+                </div>
+            </div>
+        </div>
+        <script>
+            $('.js-theme').change(function () {
+                this.form.submit();
+            });
+        </script>
+        <div class="panel panel-default">
             <div class="panel-heading">Sections</div>
             <div class="panel-body">
                 @EnabledLabel("Dashboard", s.Dashboard.Enabled)
@@ -65,7 +82,6 @@
                 @EnabledLabel("Elastic", s.Elastic.Enabled)
                 @EnabledLabel("HAProxy", s.HAProxy.Enabled)
                 @EnabledLabel("HAProxy Traffic", s.HAProxy.Traffic.Enabled)
-                @EnabledLabel("TeamCity", s.TeamCity.Enabled)
             </div>
         </div>
     </div>
@@ -335,41 +351,4 @@ sp_AskBrent: @features.HasSPAskBrent.ToString()
             </div>
         </div>
     }
-</div>
-<div class="about">
-    <section class="per-section-props">
-        @if (s.TeamCity.Enabled)
-        {
-            var projects = BuildStatus.GetAllProjects();
-            var configs = BuildStatus.Configs;
-            <header class="properties">TeamCity</header>
-            <section class="properties">
-                <ul>
-                    <li>Url: <span class="value">@s.TeamCity.Url</span></li>
-                    <li>User: <span class="value">@s.TeamCity.User</span></li>
-                    <li>Fetch: <span class="value">@BuildStatus.LastFetch</span></li>
-                    <li>Fetch Interval: <span class="value">@s.TeamCity.BuildFetchIntervalSeconds</span></li>
-                    <li>Projects: <span class="value">@projects.Count</span></li>
-                    <li>Build Configs: <span class="value">@configs.Count</span></li>
-                    <li>
-                        Build Mapped Servers: <span class="value">@s.TeamCity.ServerMaps.Count</span>
-                        <ul class="sub-list">
-                            @foreach (var map in s.TeamCity.ServerMaps)
-                            {
-                                <li>
-                                    <span class="value">@map.Key</span>
-                                    <ul class="sub-list">
-                                        @foreach (var config in BuildStatus.GetBuildConfigsByServer(map.Key))
-                                        {
-                                            <li>@config.ProjectName - @config.Name (@config.Id)</li>
-                                        }
-                                    </ul>
-                                </li>
-                            }
-                        </ul>
-                    </li>
-                </ul>
-            </section>
-        }
-    </section>
 </div>

@@ -2,7 +2,6 @@
 @using StackExchange.Opserver.Data.Dashboard
 @using StackExchange.Opserver.Models
 @using StackExchange.Opserver.Views.Dashboard
-@using System.Globalization
 @model DashboardModel
 @{
     // Note: not using MVC Url.Action and such here because it's too slow
@@ -12,18 +11,34 @@
                           .Where(g => g.Any() && (g.Key != DashboardCategory.Unknown || Current.Settings.Dashboard.ShowOther))
                           .OrderBy(g => g.Key.Index);
 }
-@helper Graph(Node s, string type)
+@helper Graph(Node n, string type)
 {
 if (DashboardData.HasData)
 {
-        <a href="#/dashboard/graph/@(s.Id.UrlEncode())/@type">
-            <img src="~/graph/@type.ToLower()/spark?id=@s.Id" alt="" />
-        </a>
-}
+<a href="#/dashboard/graph/@(n.Id.UrlEncode())/@type"><img src="~/graph/@type/spark?id=@n.Id" alt="" /></a>}
 else
 {
-        <div class="text-muted">No Data Available</div>
+<div class="text-muted">No Data Available</div>}
 }
+@helper DiskText(Node n)
+{
+    var worst = n.Volumes?.Where(v => v?.PercentUsed.HasValue ?? false).DefaultIfEmpty().Max(v => v?.PercentUsed);
+    if (worst > 0)
+    {
+        @worst.Value.ToString("n0")@:%
+    }
+}
+@helper DiskGraphs(Node n)
+{
+    if (n.Volumes != null)
+    {
+        foreach (var vol in n.Volumes)
+        {
+            <div class="progress vertical" title="@vol.PrettyName: @(vol.PercentUsed?.ToString("n2"))% used (@vol.PrettyUsed/@vol.PrettySize)">
+                <div class="progress-bar @vol.SpaceStatus.ProgressBarClass()" style="height: @(vol.PercentUsed?.ToString("n2",CultureInfo.InvariantCulture))%"></div>
+            </div>
+        }
+    }
 }
 <div class="js-refresh" data-name="dashboard-overview">
     @if (!Model.Nodes.Any())
@@ -64,7 +79,7 @@ else
                 {
                     <tbody>
                         <tr class="category-row">
-                            <th colspan="7">
+                            <th colspan="9">
                                 <h5>@c.Name</h5>
                             </th>
                         </tr>
@@ -73,28 +88,31 @@ else
                             <th colspan="2">CPU</th>
                             <th colspan="2">Memory</th>
                             <th colspan="2">Network</th>
+                            <th colspan="2">Disk</th>
                         </tr>
                         @foreach (var n in g.OrderBy(n => n.PrettyName))
                         {
-                            <tr class="@n.RowClass() @(n.IsVM ? " virtual-machine" : "")@(n.IsUnwatched ? " unwatched-row" : "")" data-search="@c.Name.ToLower()-@n.SearchString" data-node="@n.PrettyName">
-                                <td title="@(n.IsVM ? "Virtual Machine hosted on " + n.VMHost.PrettyName + " " : "")Last Updated: @(n.LastSync?.ToRelativeTime())">
+                            <tr class="@(n.RowClass().Nullify())@(n.IsVM ? " virtual-machine" : null)@(n.IsUnwatched ? " unwatched-row" : null)" data-search="@c.Name.ToLower()-@n.SearchString" data-node="@n.PrettyName">
+                                <td title="@(n.IsVM ? "Virtual Machine hosted on " + n.VMHost.PrettyName + " " : null)Last Updated: @(n.LastSync?.ToRelativeTime())">
                                     @n.IconSpan()
-                                    <a href="~/dashboard/node?node=@n.PrettyName" class="@n.TextClass()">@n.PrettyName</a>
+                                    <a href="~/dashboard/node?node=@n.PrettyName" class="@n.TextClass().Nullify()">@n.PrettyName</a>
                                 </td>
-                                <td title="@n.ApplicationCPUTextSummary()">@n.CPUStatusSpan()</td>
+                                <td title="@n.ApplicationCPUTextSummary().Nullify()" class="@n.CPUMonitorStatus().TextClass().Nullify()">@(n.CPULoad?.ToString("n0")) %</td>
                                 <td>@Graph(n, "cpu")</td>
-                                <td title="@n.ApplicationMemoryTextSummary()">
-                                    <span class="@n.MemoryMonitorStatus().TextClass()">@n.PrettyMemoryUsed() / @n.PrettyTotalMemory() (@(n.PercentMemoryUsed?.ToString("n2"))%)</span>
+                                <td title="@n.ApplicationMemoryTextSummary().Nullify()">
+                                    <span class="@n.MemoryMonitorStatus().TextClass().Nullify()">@n.PrettyMemoryUsed() / @n.PrettyTotalMemory() (@(n.PercentMemoryUsed?.ToString("n2"))%)</span>
                                     @if (n.MemoryUsed >= 0)
                                     {
-                                        <div class="progress" style="width: 215px;">
-                                            <div class="progress-bar @n.MemoryMonitorStatus().ProgressBarClass()" style="width: @(n.PercentMemoryUsed?.ToString(CultureInfo.InvariantCulture))%"></div>
-                                        </div>
+                                    <div class="progress" style="width: 215px;">
+                                        <div class="progress-bar @n.MemoryMonitorStatus().ProgressBarClass()" style="width: @(n.PercentMemoryUsed?.ToString("n2",CultureInfo.InvariantCulture))%"></div>
+                                    </div>
                                     }
                                 </td>
                                 <td>@Graph(n, "memory")</td>
-                                <td title="@n.NetworkTextSummary()">@n.PrettyTotalNetwork()</td>
+                                <td>@n.PrettyTotalNetwork()</td>
                                 <td>@Graph(n, "network")</td>
+                                <td>@DiskText(n)</td>
+                                <td>@DiskGraphs(n)</td>
                             </tr>
                         }
                     </tbody>

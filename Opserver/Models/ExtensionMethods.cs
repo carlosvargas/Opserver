@@ -15,32 +15,8 @@ namespace StackExchange.Opserver.Models
 {
     public static class ExtensionMethods
     {
-        public static IHtmlString ToSpeed(this float bps, string unit = "b")
-        {
-            if (bps < 1) return @"<span class=""speed pow0"">0 b/s</span>".AsHtml();
-            var pow = Math.Floor(Math.Log10(bps) / 3);
-            var byteScale = bps.ToSize(unit);
-            return string.Format(@"<span class=""speed pow{1}"">{0}/s</span>", byteScale, pow.ToString(CultureInfo.InvariantCulture)).AsHtml();
-        }
-
-        public static IHtmlString ToQueryString(this SQLInstance.TopSearchOptions options, bool leadingAmp = false)
-        {
-            var sb = StringBuilderCache.Get();
-
-            // TODO: Refactor all of this to proper classes
-            // For example, this is called in a loop and running the same code n times for no reason
-            
-            if (options.MinExecs.HasValue) sb.Append("MinExecs=").Append(options.MinExecs.ToString()).Append("&");
-            if (options.MinExecsPerMin.HasValue) sb.Append("MinExecsPerMin=").Append(options.MinExecsPerMin.ToString()).Append("&");
-            if (options.Search.HasValue()) sb.Append("Search=").Append(options.Search.UrlEncode()).Append("&");
-            if (options.Database.HasValue) sb.Append("Database=").Append(options.Database.Value).Append("&");
-            if (options.LastRunSeconds.HasValue) sb.Append("LastRunSeconds=").Append(options.LastRunSeconds.Value).Append("&");
-
-            if (sb.Length <= 0) return MvcHtmlString.Empty;
-
-            if (leadingAmp) sb.Insert(0, "&");
-            return sb.ToStringRecycle(0, sb.Length - 1).AsHtml();
-        }
+        public static string ToSpeed(this float bps, string unit = "b") =>
+            bps < 1 ? "0 b/s" : $"{bps.ToSize(unit)}/s";
     }
 
     public static class VolumeExtensionMethods
@@ -50,9 +26,9 @@ namespace StackExchange.Opserver.Models
 
     public static class InterfaceExtensionMethods
     {
-        public static IHtmlString PrettyIn(this Interface i) => i.InBps?.ToSpeed() ?? MvcHtmlString.Empty;
+        public static string PrettyIn(this Interface i) => i.InBps?.ToSpeed();
 
-        public static IHtmlString PrettyOut(this Interface i) => i.OutBps?.ToSpeed() ?? MvcHtmlString.Empty;
+        public static string PrettyOut(this Interface i) => i.OutBps?.ToSpeed();
     }
 
     public static class NodeExtensionMethods
@@ -78,8 +54,8 @@ namespace StackExchange.Opserver.Models
         public static MonitorStatus MemoryMonitorStatus(this Node info)
         {
             if (!info.PercentMemoryUsed.HasValue) return MonitorStatus.Unknown;
-            if (info.Category.MemoryCriticalPercent > 0 && info.PercentMemoryUsed > (float) info.Category.MemoryCriticalPercent) return MonitorStatus.Critical;
-            if (info.Category.MemoryWarningPercent > 0 && info.PercentMemoryUsed > (float) info.Category.MemoryWarningPercent) return MonitorStatus.Warning;
+            if (info.MemoryCriticalPercent > 0 && info.PercentMemoryUsed > (float) info.MemoryCriticalPercent) return MonitorStatus.Critical;
+            if (info.MemoryWarningPercent > 0 && info.PercentMemoryUsed > (float) info.MemoryWarningPercent) return MonitorStatus.Warning;
             return MonitorStatus.Good;
         }
 
@@ -102,8 +78,8 @@ namespace StackExchange.Opserver.Models
         public static MonitorStatus CPUMonitorStatus(this Node info)
         {
             if (!info.CPULoad.HasValue) return MonitorStatus.Unknown;
-            if (info.Category.CPUCriticalPercent > 0 && info.CPULoad > info.Category.CPUCriticalPercent) return MonitorStatus.Critical;
-            if (info.Category.CPUWarningPercent > 0 && info.CPULoad > info.Category.CPUWarningPercent) return MonitorStatus.Warning;
+            if (info.CPUCriticalPercent > 0 && info.CPULoad > info.CPUCriticalPercent) return MonitorStatus.Critical;
+            if (info.CPUWarningPercent > 0 && info.CPULoad > info.CPUWarningPercent) return MonitorStatus.Warning;
             return MonitorStatus.Good;
         }
 
@@ -113,12 +89,12 @@ namespace StackExchange.Opserver.Models
             return $@"<span class=""{info.CPUMonitorStatus().GetDescription()}"">{info.CPULoad?.ToString("n0")} %</span>".AsHtml();
         }
 
-        public static IHtmlString PrettyTotalNetwork(this Node info) =>
+        public static string PrettyTotalNetwork(this Node info) =>
             info.TotalPrimaryNetworkbps < 0
-                ? MvcHtmlString.Empty
+                ? null
                 : info.TotalPrimaryNetworkbps.ToSpeed();
 
-        public static IHtmlString NetworkTextSummary(this Node info)
+        public static string NetworkTextSummary(this Node info)
         {
             var sb = StringBuilderCache.Get();
             sb.Append("Total Traffic: ").Append(info.TotalPrimaryNetworkbps.ToSize("b")).AppendLine("/s");
@@ -129,12 +105,12 @@ namespace StackExchange.Opserver.Models
                     (i.InBps.GetValueOrDefault(0) + i.OutBps.GetValueOrDefault(0)).ToSize("b"),
                     i.InBps.GetValueOrDefault(0).ToSize("b"), i.OutBps.GetValueOrDefault(0).ToSize("b"));
             }
-            return sb.ToStringRecycle().AsHtml();
+            return sb.ToStringRecycle();
         }
 
-        public static IHtmlString ApplicationCPUTextSummary(this Node info)
+        public static string ApplicationCPUTextSummary(this Node info)
         {
-            if (info.Apps?.Any() != true) return MvcHtmlString.Empty;
+            if (info.Apps?.Any() != true) return "";
 
             var sb = StringBuilderCache.Get();
             sb.AppendFormat("Total App Pool CPU: {0} %\n", info.Apps.Sum(a => a.PercentCPU.GetValueOrDefault(0)).ToString(CultureInfo.CurrentCulture));
@@ -142,13 +118,13 @@ namespace StackExchange.Opserver.Models
             foreach (var a in info.Apps.OrderBy(a => a.NiceName))
             {
                 sb.AppendFormat("  {0}: {1} %\n", a.NiceName, a.PercentCPU?.ToString(CultureInfo.CurrentCulture));
-            }   
-            return sb.ToStringRecycle().AsHtml();
+            } 
+            return sb.ToStringRecycle();
         }
 
-        public static IHtmlString ApplicationMemoryTextSummary(this Node info)
+        public static string ApplicationMemoryTextSummary(this Node info)
         {
-            if (info.Apps?.Any() != true) return MvcHtmlString.Empty;
+            if (info.Apps?.Any() != true) return "";
 
             var sb = StringBuilderCache.Get();
             sb.AppendFormat("Total App Pool Memory: {0}\n", info.Apps.Sum(a => a.MemoryUsed.GetValueOrDefault(0)).ToSize());
@@ -157,7 +133,7 @@ namespace StackExchange.Opserver.Models
             {
                 sb.AppendFormat("  {0}: {1}\n", a.NiceName, a.MemoryUsed.GetValueOrDefault(0).ToSize());
             }
-            return sb.ToStringRecycle().AsHtml();
+            return sb.ToStringRecycle();
         }
     }
 

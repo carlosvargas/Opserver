@@ -220,11 +220,11 @@ FROM (SELECT TOP (@MaxResultCount)
             public int? MaxResultCount { get; set; }
             public int? Database { get; set; }
 
-            public static TopSearchOptions Default => new TopSearchOptions().SetDefaults();
-            
-            private int DefaultMinExecs = 25;
-            private int DefaultLastRunSeconds = 24 * 60 * 60;
-            private int DefaultMaxResultCount = 100;
+            public static readonly TopSearchOptions Default = new TopSearchOptions().SetDefaults();
+
+            private const int DefaultMinExecs = 25;
+            private const int DefaultLastRunSeconds = 24*60*60;
+            private const int DefaultMaxResultCount = 100;
 
             public TopSearchOptions SetDefaults()
             {

@@ -13,6 +13,7 @@ namespace StackExchange.Opserver.Data.Dashboard
         
         public DashboardDataProvider DataProvider { get; set; }
         public bool IsRealTimePollable => MachineType?.Contains("Windows") == true;
+        public List<Issue<Node>> Issues { get; set; }
 
         public string Id { get; internal set; }
         public string Name { get; internal set; }
@@ -24,6 +25,7 @@ namespace StackExchange.Opserver.Data.Dashboard
 
         public DateTime? LastBoot { get; internal set; }
         public NodeStatus Status { get; internal set; }
+        public string StatusDescription { get; internal set; }
 
         public short? CPULoad { get; internal set; }
         public float? TotalMemory { get; internal set; }
@@ -117,11 +119,19 @@ namespace StackExchange.Opserver.Data.Dashboard
         public float? PercentMemoryUsed => MemoryUsed * 100 / TotalMemory;
 
         public float TotalNetworkbps => Interfaces.Sum(i => i.InBps.GetValueOrDefault(0) + i.OutBps.GetValueOrDefault(0));
-
         public float TotalPrimaryNetworkbps => PrimaryInterfaces.Sum(i => i.InBps.GetValueOrDefault(0) + i.OutBps.GetValueOrDefault(0));
 
         private DashboardSettings.NodeSettings _settings;
-        public DashboardSettings.NodeSettings Settings => _settings ?? (_settings = Current.Settings.Dashboard.GetNodeSettings(PrettyName, Category.Settings));
+        public DashboardSettings.NodeSettings Settings => _settings ?? (_settings = Current.Settings.Dashboard.GetNodeSettings(PrettyName));
+
+        private decimal? GetSetting(Func<INodeSettings, decimal?> func) => func(Settings) ?? func(Category?.Settings) ?? func(Current.Settings.Dashboard);
+        public decimal? CPUWarningPercent => GetSetting(i => i.CPUWarningPercent);
+        public decimal? CPUCriticalPercent => GetSetting(i => i.CPUCriticalPercent);
+        public decimal? MemoryWarningPercent => GetSetting(i => i.MemoryCriticalPercent);
+        public decimal? MemoryCriticalPercent => GetSetting(i => i.MemoryCriticalPercent);
+        public decimal? DiskWarningPercent => GetSetting(i => i.DiskWarningPercent);
+        public decimal? DiskCriticalPercent => GetSetting(i => i.DiskCriticalPercent);
+        
 
         private List<Interface> _primaryInterfaces; 
         public List<Interface> PrimaryInterfaces
