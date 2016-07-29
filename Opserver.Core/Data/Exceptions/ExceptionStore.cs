@@ -64,7 +64,8 @@ Select 'API' as Name,
        COUNT(ID) as ExceptionCount,
 	   0 AS RecentExceotionCount,
 	   MAX(Date) as MostRecent
-  From APIErrors", new {Current.Settings.Exceptions.RecentSeconds}).ConfigureAwait(false);
+  From APIErrors
+Where Level = 'ERROR'", new {Current.Settings.Exceptions.RecentSeconds}).ConfigureAwait(false);
                                 result.ForEach(a => { a.StoreName = Name; a.Store = this; });
                                 return result;
                          })
@@ -84,6 +85,7 @@ Select 'API' as Name,
                         () => QueryListAsync<Error>($"ErrorSummary Fetch: {Name}", @"
 Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
   From APIErrors as e
+ Where Level = 'ERROR'
  Order By Date Desc", new { PerAppSummaryCount }))
                 });
             }
@@ -120,6 +122,7 @@ Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As Cr
             return QueryListAsync<Error>($"{nameof(GetAllErrorsAsync)}() for {Name} App: {appName ?? "All"}", @"
 Select TOP (@maxPerApp) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
   From APIErrors as e
+ Where Level = 'ERROR'
  Order By Date Desc", new {maxPerApp, appName});
         }
 
@@ -192,7 +195,7 @@ Update Exceptions
                     sqlError = await c.QueryFirstOrDefaultAsync<Error>(@"
     Select Top 1 e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request AS FullJson, e.Message, e.StatusCode, '', 0 AS DuplicationCount, e.Exception as Detail
       From ApiErrors e
-     Where GUID = @guid", new { guid }, commandTimeout: QueryTimeout).ConfigureAwait(false);
+     Where GUID = @guid AND Level = 'ERROR'", new { guid }, commandTimeout: QueryTimeout).ConfigureAwait(false);
                 }
                 if (sqlError == null) return null;
 

@@ -63,13 +63,13 @@
         <td>@e.Host</td>
         @if (!string.IsNullOrEmpty(@e.MachineName))
         {
-	        <td style="@errorStyle">@e.MachineName.ToLower()</td>
+	        <td>@e.MachineName.ToLower()</td>
         }
         else
         {
-	        <td style="@errorStyle"></td>
+	        <td></td>
         }
-        <td style="@errorStyle" data-count="@e.DuplicateCount">@Html.Raw(e.DuplicateCount > 1 ? "(" + (e.DuplicateCount) + "&times;)" : "")</td>
+        <td data-count="@e.DuplicateCount">@Html.Raw(e.DuplicateCount > 1 ? "(" + (e.DuplicateCount) + "&times;)" : "")</td>
         <td>@e.IPAddress</td>
     </tr>
 }   
