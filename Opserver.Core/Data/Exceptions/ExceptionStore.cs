@@ -41,11 +41,12 @@ namespace StackExchange.Opserver.Data.Exceptions
             Settings = settings;
         }
 
-        public Func<Cache<T>, Task> UpdateFromSql<T>(string opName, Func<Task<T>> getFromConnection) where T : class
+        public Func<Cache<T>, Task> UpdateFromSql<T>(string opName, Func<Task<T>> getFromConnection, Action<Cache<T>> afterPoll = null) where T : class
         {
             return UpdateCacheItem("Exceptions Fetch: " + Name + ":" + opName,
                 getFromConnection,
-                addExceptionData: e => e.AddLoggedData("Server", Name));
+                addExceptionData: e => e.AddLoggedData("Server", Name),
+                afterPoll: afterPoll);
         }
 
         private Cache<List<Application>> _applications;
@@ -62,14 +63,15 @@ namespace StackExchange.Opserver.Data.Exceptions
                                 var result = await QueryListAsync<Application>($"Applications Fetch: {Name}", @"
 Select 'API' as Name, 
        COUNT(ID) as ExceptionCount,
-	   0 AS RecentExceotionCount,
+	   0 AS RecentExceptionCount,
 	   MAX(Date) as MostRecent
   From APIErrors
 Where Level = 'ERROR'", new {Current.Settings.Exceptions.RecentSeconds}).ConfigureAwait(false);
                                 result.ForEach(a => { a.StoreName = Name; a.Store = this; });
                                 return result;
-                         })
-                    });
+                               },
+                               afterPoll: cache => ExceptionStores.UpdateApplicationGroups())
+                       });
             }
         }
 
@@ -86,21 +88,31 @@ Where Level = 'ERROR'", new {Current.Settings.Exceptions.RecentSeconds}).Configu
 Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
   From APIErrors as e
  Where Level = 'ERROR'
- Order By Date Desc", new { PerAppSummaryCount }))
-                });
+ Order By Date Desc", new { PerAppSummaryCount }),
+                               afterPoll: cache => ExceptionStores.UpdateApplicationGroups())
+                       });
             }
         }
 
-        public List<Error> GetErrorSummary(int maxPerApp, string appName = null)
+        public List<Error> GetErrorSummary(int maxPerApp, string group = null, string app = null)
         {
             var errors = ErrorSummary.Data;
             if (errors == null) return new List<Error>();
-            // specific application
-            if (appName.HasValue())
+            // specific application - this is most specific
+            if (app.HasValue())
             {
-                return errors.Where(e => e.ApplicationName == appName)
+                return errors.Where(e => e.ApplicationName == app)
                              .Take(maxPerApp)
                              .ToList();
+            }
+            if (group.HasValue())
+            {
+                var apps = ExceptionStores.GetAppNames(group, app).ToHashSet();
+                return errors.GroupBy(e => e.ApplicationName)
+                             .Where(g => apps.Contains(g.Key))
+                             .SelectMany(e => e.Take(maxPerApp))
+                             .ToList();
+
             }
             // all apps, 1000
             if (maxPerApp == PerAppSummaryCount)
@@ -117,13 +129,13 @@ Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As Cr
         /// Get all current errors, possibly per application
         /// </summary>
         /// <remarks>This does not populate Detail, it's comparatively large and unused in list views</remarks>
-        public Task<List<Error>> GetAllErrorsAsync(int maxPerApp, string appName = null)
+        public Task<List<Error>> GetAllErrorsAsync(int maxPerApp, IEnumerable<string> apps = null)
         {
-            return QueryListAsync<Error>($"{nameof(GetAllErrorsAsync)}() for {Name} App: {appName ?? "All"}", @"
+            return QueryListAsync<Error>($"{nameof(GetAllErrorsAsync)}() for {Name}", @"
 Select TOP (@maxPerApp) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
   From APIErrors as e
  Where Level = 'ERROR'
- Order By Date Desc", new {maxPerApp, appName});
+ Order By Date Desc", new {maxPerApp, apps});
         }
 
         public Task<List<Error>> GetSimilarErrorsAsync(Error error, int max)
@@ -144,23 +156,23 @@ Select TOP (@maxPerApp) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e
      Order By Date Desc", new { max, start = error.CreationDate.AddMinutes(-5), end = error.CreationDate.AddMinutes(5) });
         }
 
-        public Task<List<Error>> FindErrorsAsync(string searchText, string appName, int max, bool includeDeleted)
+        public Task<List<Error>> FindErrorsAsync(string searchText, int max, bool includeDeleted, IEnumerable<string> apps = null)
         {
             return QueryListAsync<Error>($"{nameof(FindErrorsAsync)}() for {Name}", @"
 	Select TOP (@max) e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
 	  From APIErrors as e
      Where (Message Like @search Or request Like @search Or Url Like @search)
-     Order By Date Desc", new { search = '%' + searchText + '%', appName, max });
+     Order By Date Desc", new { search = '%' + searchText + '%', apps, max });
         }
 
-        public Task<int> DeleteAllErrorsAsync(string appName)
+        public Task<int> DeleteAllErrorsAsync(List<string> apps)
         {
-            return ExecTaskAsync($"{nameof(DeleteAllErrorsAsync)}() (app: {appName}) for {Name}", @"
+            return ExecTaskAsync($"{nameof(DeleteAllErrorsAsync)}() for {Name}", @"
 Update Exceptions 
    Set DeletionDate = GETUTCDATE() 
  Where DeletionDate Is Null 
    And IsProtected = 0 
-   And ApplicationName = @appName", new { appName });
+   And ApplicationName In @apps", new { apps });
         }
 
         public Task<int> DeleteSimilarErrorsAsync(Error error)

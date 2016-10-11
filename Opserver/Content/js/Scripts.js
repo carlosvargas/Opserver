@@ -283,7 +283,7 @@
             }, Status.options.HeaderRefresh * 1000);
         }
 
-        var resizeTimer;
+        var resizeTimer, dropdownPause;
         $(window).resize(function() {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(function() {
@@ -366,9 +366,32 @@
                         });
                 }
             });
+        }).on('click', '.js-dropdown-actions', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            var jThis = $(this);
+            if (jThis.hasClass('open')) {
+                jThis.removeClass('open');
+                resumeRefresh();
+            } else {
+                $('.js-dropdown-actions.open').removeClass('open');
+                var ddSource = $('.js-haproxy-server-dropdown ul').clone();
+                jThis.append(ddSource);
+                var actions = jThis.data('actions');
+                if (actions) {
+                    jThis.find('a[data-action]').each(function(_, i) {
+                        $(i).toggleClass('disabled', actions.indexOf($(i).data('action')) === -1);
+                    });
+                }
+                jThis.addClass('open');
+                pauseRefresh();
+            }
+        }).on('click', '.js-dropdown-actions a', function (e) {
+            e.preventDefault();
         }).on({
             'click': function() {
                 $('.action-popup').remove();
+                $('.js-dropdown-actions.open').removeClass('open');
             },
             'show': function() {
                 setRefreshInterval(1);
@@ -937,20 +960,38 @@ Status.Redis = (function () {
 Status.Exceptions = (function () {
 
     function refreshCounts(data) {
-        if (!data.apps && data.apps.length) return;
-        $('.badge-link-list li').each(function () {
-            var app = data.apps[$(this).data('name')];
-            $('.badge', this).text(app && app.ExceptionCount ? app.ExceptionCount.toLocaleString() : '');
+        if (!(data.Groups && data.Groups.length)) return;
+        var log = Status.Exceptions.options.log,
+            logCount = 0,
+            group = Status.Exceptions.options.group,
+            groupCount = 0;
+        // For any not found...
+        $('.js-exception-total').text('0');
+        data.Groups.forEach(function(g) {
+            if (g.Name === group) {
+                groupCount = g.Total;
+            }
+            $('.js-exception-total[data-name="' + g.Name + '"]').text(g.Total.toLocaleString());
+            g.Applications.forEach(function(app) {
+                if (app.Name === log) {
+                    logCount = app.Total;
+                }
+                $('.js-exception-total[data-name="' + g.Name + '-' + app.Name + '"]').text(app.Total.toLocaleString());
+            });
         });
         if (Status.Exceptions.options.search) return;
-        var log = Status.Exceptions.options.log;
-        if (log) {
-            var count = data.apps[log].ExceptionCount;
-            $('.js-exception-title').text(count.toLocaleString() + ' ' + log + ' Exception' + (count !== 1 ? 's' : ''));
-        } else {
-            $('.js-exception-title').text(total.toLocaleString() + ' Exception' + (data.total !== 1 ? 's' : ''));
+        function setTitle(name, count) {
+            $('.js-exception-title').text(count.toLocaleString() + ' ' + name + ' Exception' + (count !== 1 ? 's' : ''));
         }
-        $('.js-top-tabs .badge[data-name="Exceptions"]').text(data.total.toLocaleString());
+
+        if (log) {
+            setTitle(log, logCount);
+        } else if (group) {
+            setTitle(group, groupCount);
+        } else {
+            setTitle('', data.Total);
+        }
+        $('.js-top-tabs .badge[data-name="Exceptions"]').text(data.Total.toLocaleString());
     }
 
     function init(options) {
@@ -1024,7 +1065,7 @@ Status.Exceptions = (function () {
                 url: url,
                 success: function (data) {
                     if (options.showingDeleted) {
-                        jThis.attr('title', 'Error is already deleted');
+                        jThis.attr('title', 'Error is already deleted').addClass('disabled');
                         jRow.addClass('deleted');
                         // TODO: Replace protected glyph here
                         //jCell.find('span.protected').replaceWith('<a title="Undelete and protect this error" class="protect-link" href="' + url.replace('/delete', '/protect') + '">&nbsp;P&nbsp;</a>');
@@ -1100,9 +1141,7 @@ Status.Exceptions = (function () {
                 }
             });
             return false;
-        });
-        
-        $('.js-content').on('click', '.js-exceptions tbody td', function (e) {
+        }).on('click', '.js-exceptions tbody td', function (e) {
             if ($(e.target).closest('a').length) {
                 return;
             }
@@ -1181,6 +1220,7 @@ Status.Exceptions = (function () {
                     $.ajax({
                         type: 'POST',
                         data: {
+                            group: jThis.data('group') || options.group,
                             log: jThis.data('log') || options.log,
                             id: jThis.data('id') || options.id
                         },
@@ -1200,17 +1240,17 @@ Status.Exceptions = (function () {
 
         $(document).on('click', 'a.js-clear-visible', function () {
             var jThis = $(this);
-            bootbox.confirm('Really delete all non-protected errors?', function (result) {
+            bootbox.confirm('Really delete all visible, non-protected errors?', function (result) {
                 if (result)
                 {
-                    var ids = $('.exceptions-dashboard tr.error:not(.protected,.deleted)').map(function () { return $(this).data('id'); }).get();
+                    var ids = $('.js-error:not(.protected,.deleted)').map(function () { return $(this).data('id'); }).get();
                     jThis.find('.glyphicon').addClass('icon-rotate-flip');
 
                     $.ajax({
                         type: 'POST',
                         traditional: true,
-                        data: { log: options.log, ids: ids },
-                        url: Status.options.rootPath + 'exceptions/delete-list',
+                        data: { group: options.group, log: options.log, ids: ids },
+                        url: jThis.data('url'),
                         success: function (data) {
                             window.location.href = data.url;
                         },
@@ -1295,7 +1335,7 @@ Status.Exceptions = (function () {
                 success: function (data) {
                     $(this).removeClass('loading');
                     if (data.success) {
-                        if (data.browseUrl != null && data.browseUrl !== "") {
+                        if (data.browseUrl && data.browseUrl !== "") {
 
                             var issueLink = '<a href="' + data.browseUrl + '" target="_blank">' + data.issueKey + '</a>';
                             $("#jira-links-container").show();
@@ -1336,7 +1376,7 @@ Status.HAProxy = (function () {
         }
 
         // Admin Panel (security is server-side)
-        $('.js-content').on('click', '.js-haproxy-action', function (e) {
+        $('.js-content').on('click', '.js-haproxy-action, .js-haproxy-actions a', function (e) {
             var jThis = $(this),
                 data = {
                     group: jThis.closest('[data-group]').data('group'),
@@ -1346,7 +1386,8 @@ Status.HAProxy = (function () {
                 };
 
             function haproxyAction() {
-                jThis.addClass('icon-rotate-flip');
+                jThis.find('.glyphicon').addBack('.glyphicon').addClass('icon-rotate-flip');
+                var cog = jThis.closest('.js-dropdown-actions').find('.hover-spin > .glyphicon').addClass('spin');
                 $.ajax({
                     type: 'POST',
                     data: data,
@@ -1356,6 +1397,7 @@ Status.HAProxy = (function () {
                     },
                     error: function () {
                         jThis.removeClass('icon-rotate-flip').parent().errorPopup('An error occured while trying to ' + data.act + '.');
+                        cog.removeClass('spin');
                     }
                 });
             }
@@ -1604,6 +1646,7 @@ Status.HAProxy = (function () {
                 dateRanges: true,
                 interpolation: 'linear',
                 leftMargin: 40,
+                live: false,
                 id: this.data('id'),
                 title: this.data('title'),
                 subtitle: this.data('subtitle'),
@@ -1662,11 +1705,9 @@ Status.HAProxy = (function () {
                 if (options.width - 10 - options.leftMargin < 300)
                     options.width = 300 + 10 + options.leftMargin;
                 
-                margin = { top: 10, right: options.rightMargin || 10, bottom: 100, left: options.leftMargin };
-                margin2 = { top: options.height - 77, right: 10, bottom: 20, left: options.leftMargin };
+                margin = { top: 10, right: options.rightMargin || 10, bottom: options.live ? 25 : 100, left: options.leftMargin };
                 width = options.width - margin.left - margin.right;
                 height = options.height - margin.top - margin.bottom;
-                height2 = options.height - margin2.top - margin2.bottom;
 
                 var timeFormats = d3.time.format.utc.multi([
                     ['.%L', function (d) { return d.getUTCMilliseconds(); }],
@@ -1680,13 +1721,11 @@ Status.HAProxy = (function () {
                 ]);
 
                 x = d3.time.scale.utc().range([0, width]);
-                x2 = d3.time.scale.utc().range([0, width]);
                 y = d3.scale.linear().range([height, 0]);
                 yr = d3.scale.linear().range([height, 0]);
-                y2 = d3.scale.linear().range([height2, 0]);
+
 
                 xAxis = d3.svg.axis().scale(x).orient('bottom').tickFormat(timeFormats);
-                xAxis2 = d3.svg.axis().scale(x2).orient('bottom').tickFormat(timeFormats);
                 yAxis = d3.svg.axis().scale(y).orient('left');
                 yrAxis = d3.svg.axis().scale(yr).orient('right');
                 
@@ -1706,9 +1745,6 @@ Status.HAProxy = (function () {
                     .x(x)
                     .on('brushend', redrawFromMain);
 
-                brush2 = d3.svg.brush()
-                    .x(x2)
-                    .on('brush', redrawFromSummary);
                 
                 svg = d3.select(chart[0]).append('svg')
                     .attr('width', options.width)
@@ -1721,7 +1757,21 @@ Status.HAProxy = (function () {
                     .attr('height', height);
 
                 focus = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
-                context = svg.append('g').attr('transform', 'translate(' + margin2.left + ',' + margin2.top + ')');
+
+
+                if (!options.live) { // Summary elements
+                    margin2 = { top: options.height - 77, right: 10, bottom: 20, left: options.leftMargin };
+                    height2 = options.height - margin2.top - margin2.bottom;
+                    x2 = d3.time.scale.utc().range([0, width]);
+                    y2 = d3.scale.linear().range([height2, 0]);
+                    xAxis2 = d3.svg.axis().scale(x2).orient('bottom').tickFormat(timeFormats);
+
+                    brush2 = d3.svg.brush()
+                        .x(x2)
+                        .on('brush', redrawFromSummary);
+
+                    context = svg.append('g').attr('transform', 'translate(' + margin2.left + ',' + margin2.top + ')');
+                }
             }
             
             function getClass(prefix, s) {
@@ -1749,8 +1799,11 @@ Status.HAProxy = (function () {
             
             function drawPrimaryGraphs(data) {
                 x.domain(options.ajaxZoom ? d3.extent(data.points.map(function (d) { return d.date; })) : [minDate, maxDate]);
-                x2.domain(d3.extent(data.summary.map(function (d) { return d.date; })));
-                y2.domain(getExtremes(data.summary, series, options.min, options.max));
+
+                if (!options.live) { // Summary
+                    x2.domain(d3.extent(data.summary.map(function(d) { return d.date; })));
+                    y2.domain(getExtremes(data.summary, series, options.min, options.max));
+                }
 
                 rescaleYAxis(data, true);
                 
@@ -1761,10 +1814,12 @@ Status.HAProxy = (function () {
                         .x(function(d) { return x(d.date); })
                         .y0(function(d) { return y(d.y0); })
                         .y1(function (d) { return y(d.y0 + d.y); });
-                    stackSummaryArea = d3.svg.area()
-                        .x(function(d) { return x2(d.date); })
-                        .y0(function(d) { return y2(d.y0); })
-                        .y1(function (d) { return y2(d.y0 + d.y); });
+                    if (!options.live) { // Summary
+                        stackSummaryArea = d3.svg.area()
+                            .x(function(d) { return x2(d.date); })
+                            .y0(function(d) { return y2(d.y0); })
+                            .y1(function(d) { return y2(d.y0 + d.y); });
+                    }
                     stackFunc = function(dataList) {
                         return stack(series.map(function(s) {
                             var result = { name: s.name, values: dataList.map(function (d) { return { date: d.date, y: d[s.name] }; }) };
@@ -1799,12 +1854,14 @@ Status.HAProxy = (function () {
                             .attr('fill', options.colorStops ? 'url(#' + gradientId + ')' : getColor())
                             .attr('clip-path', 'url(#' + clipId + ')')
                             .attr('d', s.area.y0(y(0)));
-                        // and the summary
-                        context.append('path')
-                            .datum(data.summary)
-                            .attr('class', getClass('summary-area', s))
-                            .attr('fill', getColor())
-                            .attr('d', s.summaryArea.y0(y2(0)));
+                        if (!options.live) {
+                            // and the summary
+                            context.append('path')
+                                .datum(data.summary)
+                                .attr('class', getClass('summary-area', s))
+                                .attr('fill', getColor())
+                                .attr('d', s.summaryArea.y0(y2(0)));
+                        }
                     });
                 }
 
@@ -1890,18 +1947,21 @@ Status.HAProxy = (function () {
                     .attr('y', 0)
                     .attr('height', height + 1);
 
-                context.append('g')
-                    .attr('class', 'x axis')
-                    .attr('transform', 'translate(0,' + height2 + ')')
-                    .call(xAxis2);
+                if (!options.live) {
+                    context.append('g')
+                        .attr('class', 'x axis')
+                        .attr('transform', 'translate(0,' + height2 + ')')
+                        .call(xAxis2);
 
-                // bottom selection brush, for summary
-                bottomBrushArea = context.append('g')
-                    .attr('class', 'x brush')
-                    .call(brush2);
-                bottomBrushArea.selectAll('rect')
-                    .attr('y', -6)
-                    .attr('height', height2 + 7);
+                    // bottom selection brush, for summary
+                    bottomBrushArea = context.append('g')
+                        .attr('class', 'x brush')
+                        .call(brush2);
+                    bottomBrushArea.selectAll('rect')
+                        .attr('y', -6)
+                        .attr('height', height2 + 7);
+                }
+
 
                 curWidth = chart.width();
                 curHeight = chart.height();
@@ -2083,8 +2143,10 @@ Status.HAProxy = (function () {
                 dataLoaded = true;
                 chart.find('.loader').hide();
 
-                // set the initial summary brush to reflect what was loaded up top
-                brush2.extent(x.domain())(bottomBrushArea);
+                if (!options.live) {
+                    // set the initial summary brush to reflect what was loaded up top
+                    brush2.extent(x.domain())(bottomBrushArea);
+                }
 
                 if (options.showBuilds && !data.builds) {
                     //$.getJSON(Status.options.rootPath + 'graph/builds/json', params, function (bData) {
