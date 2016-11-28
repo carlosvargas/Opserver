@@ -102,10 +102,10 @@ namespace StackExchange.Opserver.Data.Exceptions
             }
         }
 
-        public static async Task<Error> GetError(string app, Guid guid)
+        public static async Task<Error> GetError(string app, Guid guid, bool errorsOnly = true)
         {
             var stores = GetStores(app);
-            var result = await Task.WhenAll(stores.Select(s => s.GetErrorAsync(guid)));
+            var result = await Task.WhenAll(stores.Select(s => s.GetErrorAsync(guid, errorsOnly)));
             return result.FirstOrDefault(e => e != null);
         }
 
@@ -126,6 +126,7 @@ namespace StackExchange.Opserver.Data.Exceptions
                 }
                 toPoll.Add(s.Applications.PollAsync(true));
                 toPoll.Add(s.ErrorSummary.PollAsync(true));
+                toPoll.Add(s.DebugSummary.PollAsync(true));
             }
             await Task.WhenAll(toPoll);
             return result;
@@ -191,11 +192,11 @@ namespace StackExchange.Opserver.Data.Exceptions
             }
         }
 
-        public static List<Error> GetAllErrors(string group = null, string app = null, int maxPerApp = 5000, ExceptionSorts sort = ExceptionSorts.TimeDesc)
+        public static List<Error> GetAllErrors(string group = null, string app = null, int maxPerApp = 5000, ExceptionSorts sort = ExceptionSorts.TimeDesc, bool errorsOnly = true)
         {
             using (MiniProfiler.Current.Step("GetAllErrors() - All Stores" + (group.HasValue() ? " (group:" + group + ")" : "") + (app.HasValue() ? " (app:" + app + ")" : "")))
             {
-                var allErrors = Stores.SelectMany(s => s.GetErrorSummary(maxPerApp, group, app));
+                var allErrors = Stores.SelectMany(s => s.GetErrorSummary(maxPerApp, group, app, errorsOnly));
                 return GetSorted(allErrors, sort).ToList();
             }
         }

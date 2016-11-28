@@ -52,28 +52,28 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("exceptions")]
-        public ActionResult Exceptions(string group, string log, ExceptionSorts? sort = null, int? count = null)
+        public ActionResult Exceptions(string group, string log, ExceptionSorts? sort = null, int? count = null, bool errorsOnly = true)
         {
             // Defaults
             count = count ?? 250;
             sort = sort ?? ExceptionSorts.TimeDesc;
 
-            var vd = GetExceptionsModel(group, log, sort.Value, count.Value, loadAsync: 500);
+            var vd = GetExceptionsModel(group, log, sort.Value, count.Value, loadAsync: 500, errorsOnly: errorsOnly);
             return View(vd);
         }
 
         [Route("exceptions/load-more")]
-        public ActionResult LoadMore(string group, string log, ExceptionSorts sort, int? count = null, Guid? prevLast = null)
+        public ActionResult LoadMore(string group, string log, ExceptionSorts sort, int? count = null, Guid? prevLast = null, bool errorsOnly = true)
         {
-            var vd = GetExceptionsModel(group, log, sort, count, prevLast);
+            var vd = GetExceptionsModel(group, log, sort, count, prevLast, errorsOnly: errorsOnly);
             return View("Exceptions.Table.Rows", vd);
         }
 
-        public ExceptionsModel GetExceptionsModel(string group, string log, ExceptionSorts sort, int? count = null, Guid? prevLast = null, int? loadAsync = null)
+        public ExceptionsModel GetExceptionsModel(string group, string log, ExceptionSorts sort, int? count = null, Guid? prevLast = null, int? loadAsync = null, bool errorsOnly = true)
         {
             FixNames(ref group, ref log);
 
-            var errors = GetAllErrors(group, log, sort: sort);
+            var errors = GetAllErrors(group, log, sort: sort, errorsOnly: errorsOnly);
 
             var startIndex = 0;
             if (prevLast.HasValue)
@@ -152,23 +152,23 @@ namespace StackExchange.Opserver.Controllers
         }
 
         [Route("exceptions/detail")]
-        public async Task<ActionResult> Detail(string app, Guid id)
+        public async Task<ActionResult> Detail(string app, Guid id, bool errorsOnly = true)
         {
-            var e = await GetError(app, id);
+            var e = await GetError(app, id, errorsOnly);
             return View("Exceptions.Detail", e);
         }
 
         [Route("exceptions/preview")]
-        public async Task<ActionResult> Preview(string app, Guid id)
+        public async Task<ActionResult> Preview(string app, Guid id, bool errorsOnly = true)
         {
-            var e = await GetError(app, id);
+            var e = await GetError(app, id, errorsOnly);
             return View("Exceptions.Preview", e);
         }
 
         [Route("exceptions/detail/json"), AlsoAllow(Roles.Anonymous)]
-        public async Task<JsonResult> DetailJson(string app, Guid id)
+        public async Task<JsonResult> DetailJson(string app, Guid id, bool errorsOnly = true)
         {
-            var e = await GetError(app, id);
+            var e = await GetError(app, id, errorsOnly);
             return e != null
                        ? Json(new
                        {

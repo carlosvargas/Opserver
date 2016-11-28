@@ -148,6 +148,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Controllers\RequestsController.cs" />
     <Compile Include="Helpers\MiniProfilerCacheStorage.cs" />
     <Compile Include="Helpers\TestItem.cs" />
     <Compile Include="Helpers\Theme.cs" />
@@ -216,6 +217,7 @@
     <Content Include="Config\JiraSettings.json.example" />
     <Content Include="App_Code\Gauges.cshtml" />
     <None Include="compilerconfig.json" />
+    <Content Include="Config\RequestsSettings.json" />
     <None Include="Config\ExceptionsSettings.json" />
     <None Include="Config\PagerDutySettings.json.example" />
     <None Include="Config\RedisSettings.json" />
@@ -719,6 +721,25 @@
     <Content Include="Views\Hub\Index.SQL.cshtml" />
     <Content Include="Views\Hub\Index.Dashboard.cshtml" />
     <Content Include="Views\Hub\Index.Issues.cshtml" />
+    <Content Include="Views\Requests\Exceptions.cshtml" />
+    <Content Include="Views\Requests\Exceptions.Detail.cshtml">
+      <DependentUpon>Exceptions.cshtml</DependentUpon>
+    </Content>
+    <Content Include="Views\Requests\Exceptions.Navigation.cshtml">
+      <DependentUpon>Exceptions.cshtml</DependentUpon>
+    </Content>
+    <Content Include="Views\Requests\Exceptions.Preview.cshtml">
+      <DependentUpon>Exceptions.cshtml</DependentUpon>
+    </Content>
+    <Content Include="Views\Requests\Exceptions.Table.cshtml">
+      <DependentUpon>Exceptions.cshtml</DependentUpon>
+    </Content>
+    <Content Include="Views\Requests\Exceptions.Table.Rows.cshtml">
+      <DependentUpon>Exceptions.cshtml</DependentUpon>
+    </Content>
+    <Content Include="Views\Requests\Exceptions.Jira.cshtml" />
+    <Content Include="Views\Requests\Exceptions.Search.cshtml" />
+    <Content Include="Views\Requests\Exceptions.Similar.cshtml" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Content\js\Scripts.js" />

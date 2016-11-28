@@ -45,7 +45,7 @@ namespace StackExchange.Opserver.Models
 
             var tabControllers = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(s => s.GetTypes())
-                .Where(t => t.BaseType == typeof (StatusController));
+                .Where(t => t.BaseType == typeof (StatusController) || t.BaseType == typeof(ExceptionsController));
 
             foreach (var tc in tabControllers)
             {

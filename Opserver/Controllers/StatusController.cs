@@ -89,6 +89,8 @@ namespace StackExchange.Opserver.Controllers
                 return RedirectToAction(nameof(ElasticController.Dashboard), "Elastic");
             if (s.Exceptions.Enabled && s.Exceptions.HasAccess())
                 return RedirectToAction(nameof(ExceptionsController.Exceptions), "Exceptions");
+            if (s.Exceptions.Enabled && s.Exceptions.HasAccess())
+                return RedirectToAction(nameof(RequestsController.Exceptions), "Requests");
             if (s.HAProxy.Enabled && s.HAProxy.HasAccess())
                 return RedirectToAction(nameof(HAProxyController.Dashboard), "HAProxy");
 

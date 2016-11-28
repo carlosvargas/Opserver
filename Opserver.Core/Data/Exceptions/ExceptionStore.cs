@@ -30,6 +30,7 @@ namespace StackExchange.Opserver.Data.Exceptions
             {
                 yield return Applications;
                 yield return ErrorSummary;
+                yield return DebugSummary;
             }
         }
 
@@ -76,6 +77,7 @@ Where Level = 'ERROR'", new {Current.Settings.Exceptions.RecentSeconds}).Configu
         }
 
         private Cache<List<Error>> _errorSummary;
+        private Cache<List<Error>> _debugSummary;
         public Cache<List<Error>> ErrorSummary
         {
             get
@@ -93,10 +95,27 @@ Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As Cr
                        });
             }
         }
-
-        public List<Error> GetErrorSummary(int maxPerApp, string group = null, string app = null)
+        public Cache<List<Error>> DebugSummary
         {
-            var errors = ErrorSummary.Data;
+            get
+            {
+                return _debugSummary ?? (_debugSummary = new Cache<List<Error>>
+                {
+                    CacheForSeconds = Settings.PollIntervalSeconds,
+                    UpdateCache = UpdateFromSql(nameof(DebugSummary),
+                        () => QueryListAsync<Error>($"ErrorSummary Fetch: {Name}", @"
+Select e.ID AS Id, e.GUID, 'API' AS ApplicationName, e.MachineName, e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request, e.Message, e.StatusCode, '', 0
+  From APIErrors as e
+ Where Level <> 'ERROR'
+ Order By Date Desc", new { PerAppSummaryCount }),
+                               afterPoll: cache => ExceptionStores.UpdateApplicationGroups())
+                       });
+            }
+        }
+
+        public List<Error> GetErrorSummary(int maxPerApp, string group = null, string app = null, bool errorsOnly = true)
+        {
+            var errors = errorsOnly ? ErrorSummary.Data: DebugSummary.Data;
             if (errors == null) return new List<Error>();
             // specific application - this is most specific
             if (app.HasValue())
@@ -196,7 +215,7 @@ Update Exceptions
    And GUID In @ids", new { ids });
         }
         
-        public async Task<Error> GetErrorAsync(Guid guid)
+        public async Task<Error> GetErrorAsync(Guid guid, bool errorOnly = true)
         {
             try
             {
@@ -207,7 +226,7 @@ Update Exceptions
                     sqlError = await c.QueryFirstOrDefaultAsync<Error>(@"
     Select Top 1 e.ID AS Id, e.GUID, 'API' AS ApplicationName, COALESCE(e.MachineName, ''), e.Date As CreationDate, '', '', e.Host, e.Url, e.HTTPMethod, e.IPAddress, e.Request AS FullJson, e.Message, e.StatusCode, '', 0 AS DuplicationCount, e.Exception as Detail
       From ApiErrors e
-     Where GUID = @guid AND Level = 'ERROR'", new { guid }, commandTimeout: QueryTimeout).ConfigureAwait(false);
+     Where GUID = @guid AND Level " + (errorOnly ? "=" : "<>") + " 'ERROR'", new { guid }, commandTimeout: QueryTimeout).ConfigureAwait(false);
                 }
                 if (sqlError == null) return null;
 
